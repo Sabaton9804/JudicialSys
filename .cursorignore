@@ -1,0 +1,24 @@
+﻿# Evitar que Cursor indexe y descargue archivos pesados
+
+# Dependencias y builds
+node_modules/
+.next/
+out/
+build/
+
+# Documentos y archivos grandes (PDFs, oficios, etc.)
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.zip
+*.rar
+
+# OneDrive y carpetas compartidas
+*OneDrive*
+*Consejo Superior*
+
+# Logs y temporales
+*.log
+.env*

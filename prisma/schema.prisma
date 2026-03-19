@@ -1,0 +1,988 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== USUARIOS Y AUTENTICACIÓN ====================
+
+model Usuario {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  nombre        String
+  password      String
+  rol           RolUsuario @default(ESCRIBIENTE)
+  area          AreaJuzgado @default(SECRETARIA)  // DESPACHO o SECRETARIA
+  ubicacionId   String?     // Ubicación dentro de Secretaría (Términos, Oficios, Letra, etc.)
+  juzgadoId     String?
+  activo        Boolean  @default(true)
+  ultimoAcceso  DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  ubicacion     Ubicacion? @relation(fields: [ubicacionId], references: [id], onDelete: SetNull)
+  juzgado       Juzgado? @relation(fields: [juzgadoId], references: [id])
+  procesos      Proceso[]  @relation("ProcesosSecretario")
+  procesosAsignadosOficial Proceso[] @relation("ProcesosAsignadosOficial")
+  documentos    Documento[]
+  notificacionesEnviadas NotificacionLog[]
+  tareasResponsable  Tarea[]  @relation("TareasResponsable")
+  tareasCreadas      Tarea[]  @relation("TareasCreador")
+  asignaciones       AsignacionProceso[]
+  archivosSubidos    ArchivoProceso[] @relation("ArchivosSubidor")
+  archivosEliminados ArchivoProceso[] @relation("ArchivosEliminador")
+  providenciasProyectadas Providencia[] @relation("ProyectadasPor")
+  providenciasRevisadas  Providencia[] @relation("RevisadasPor")
+  providenciasFirmadas   Providencia[] @relation("FirmadasPor")
+  memoriales          Memorial[] @relation("MemorialesRecibidosPor")
+  terminosResponsable  Termino[] @relation("TerminosResponsable")
+  oficiosResponsable   Oficio[] @relation("OficiosResponsable")
+
+  @@map("usuarios")
+}
+
+// Roles separados por área funcional
+enum RolUsuario {
+  // DESPACHO
+  JUEZ
+  OFICIAL_MAYOR
+  
+  // SECRETARÍA
+  SECRETARIO
+  ESCRIBIENTE
+  ASISTENTE_JUDICIAL
+  
+  // ADMINISTRATIVO
+  ADMIN           // Admin de un juzgado (juzgadoId asignado)
+  SUPER_ADMIN     // Super usuario: asigna usuarios, gestiona juzgados, ve todo (juzgadoId null)
+}
+
+enum AreaJuzgado {
+  DESPACHO
+  SECRETARIA
+}
+
+// Tipos de juzgados civiles y afines en Colombia (Ley 270/1996, CGP, estructura Rama Judicial)
+enum TipoJuzgado {
+  CIVIL_MUNICIPAL
+  CIVIL_MUNICIPAL_PEQUENAS_CAUSAS
+  CIVIL_CIRCUITO
+  CIVIL_CIRCUITO_ESPECIALIZADO
+  PROMISCUO_MUNICIPAL
+  PROMISCUO_CIRCUITO
+}
+
+model Juzgado {
+  id                      String      @id @default(cuid())
+  nombre                  String
+  codigo                  String      @unique
+  codigoRadicacion12      String?     // Primeros 12 dígitos del radicado (Acuerdo 201/1997): ciudad(5)+corporación(2)+especialidad(2)+juzgado(3)
+  tipoJuzgado             TipoJuzgado @default(CIVIL_MUNICIPAL)
+  ciudad                  String
+  direccion       String?
+  telefono        String?
+  email           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  usuarios        Usuario[]
+  procesos        Proceso[]
+  audiencias      Audiencia[]
+  ubicaciones     Ubicacion[]
+  tiposProcesoEstadistica TipoProcesoEstadistica[]
+  edicionesEstado       EdicionEstado[]
+
+  @@map("juzgados")
+}
+
+// Lista fijada en Secretaría: un mismo Estado (N.º correlativo por año) agrupa varias providencias notificadas por estado (Art. 295 CGP).
+model EdicionEstado {
+  id               String   @id @default(cuid())
+  juzgadoId        String
+  numero           Int      // 1, 2, 3… (se muestra como Estado N.º 001 con padding)
+  anio             Int      // año del correlativo (ej. 2025)
+  fechaPublicacion DateTime // día en que se incorporan las actuaciones a este estado
+  observacion      String?  // nota general de la edición (opcional)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  juzgado       Juzgado       @relation(fields: [juzgadoId], references: [id], onDelete: Cascade)
+  providencias  Providencia[]
+
+  @@unique([juzgadoId, anio, numero])
+  @@index([juzgadoId, fechaPublicacion])
+  @@map("ediciones_estado")
+}
+
+// Tipos de proceso para estadística judicial (cada juzgado configura los que maneja)
+// categoriaProceso: CIVIL = procesos civiles (24 tipos); CONSTITUCIONAL = tutelas por derecho (12 tipos)
+model TipoProcesoEstadistica {
+  id               String           @id @default(cuid())
+  juzgadoId        String
+  nombre           String           // Nombre exacto para estadística oficial
+  codigo           String?          // Código corto opcional
+  orden            Int              @default(0)
+  activo           Boolean          @default(true)
+  categoriaProceso CategoriaProceso  @default(CIVIL)  // CIVIL o CONSTITUCIONAL (tutelas)
+  claseProceso     ClaseProceso?     // Para lógica interna (EJECUTIVO, etc.)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  juzgado          Juzgado          @relation(fields: [juzgadoId], references: [id], onDelete: Cascade)
+  procesos         Proceso[]
+
+  @@unique([juzgadoId, categoriaProceso, nombre])
+  @@index([juzgadoId])
+  @@index([juzgadoId, categoriaProceso])
+  @@map("tipos_proceso_estadistica")
+}
+
+// Ubicaciones dentro de Secretaría (cada juzgado las personaliza: Términos, Oficios, Letra, Emplazamiento, etc.)
+model Ubicacion {
+  id          String   @id @default(cuid())
+  juzgadoId   String
+  nombre      String   // Ej: Términos, Oficios, Letra, Emplazamiento
+  codigo      String?  // Código corto opcional (ej: TER, OFI)
+  orden       Int      @default(0)
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  juzgado     Juzgado  @relation(fields: [juzgadoId], references: [id], onDelete: Cascade)
+  usuarios    Usuario[]
+  tareas      Tarea[]
+  procesos    Proceso[]
+  terminos    Termino[]
+  oficios     Oficio[]
+
+  @@unique([juzgadoId, nombre])
+  @@index([juzgadoId])
+  @@map("ubicaciones")
+}
+
+// ==================== PROCESOS JUDICIALES ====================
+
+enum TipoInstancia {
+  PRIMERA_INSTANCIA
+  SEGUNDA_INSTANCIA
+}
+
+model Proceso {
+  id                String   @id @default(cuid())
+  radicado          String   @unique
+  instancia         TipoInstancia @default(PRIMERA_INSTANCIA)  // Por ley: Primera o Segunda instancia
+  categoriaProceso  CategoriaProceso  // CIVIL o CONSTITUCIONAL
+  claseProceso      ClaseProceso      // EJECUTIVO, DECLARATIVO, TUTELA, etc.
+  demanda           String
+  demandante        String
+  demandanteId      String?  // NIT/CC
+  demandado         String
+  demandadoId       String?  // NIT/CC
+  cuantia           Float?
+  moneda            String   @default("COP")
+  fechaRadicacion   DateTime @default(now())
+  fechaReparto      DateTime?
+  estado            EstadoProceso @default(ACTIVO)
+  etapaProcesal     String?  // Admisión, Notificación, Pruebas, etc.
+  observaciones     String?
+  juzgadoId         String
+  oficialMayorId    String?  // Oficial Mayor asignado (proyecta la providencia)
+  secretarioId      String?  // Secretario asignado (Secretaría)
+  ubicacionSecretariaId String?  // Ubicación actual en Secretaría (Términos, Oficios, etc.)
+  tipoProcesoEstadisticaId String?  // Tipo para estadística oficial (configurable por juzgado)
+  fechaEntradaDespacho DateTime?  // Cuándo ingresó al Despacho (asignación)
+  fechaLimiteDespacho  DateTime?  // Fecha límite para que el oficial proyecte
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  juzgado           Juzgado  @relation(fields: [juzgadoId], references: [id])
+  oficialMayor      Usuario? @relation("ProcesosAsignadosOficial", fields: [oficialMayorId], references: [id])
+  secretario        Usuario? @relation("ProcesosSecretario", fields: [secretarioId], references: [id])
+  ubicacionSecretaria Ubicacion? @relation(fields: [ubicacionSecretariaId], references: [id], onDelete: SetNull)
+  tipoProcesoEstadistica TipoProcesoEstadistica? @relation(fields: [tipoProcesoEstadisticaId], references: [id], onDelete: SetNull)
+  terminos          Termino[]
+  notificaciones    Notificacion[]
+  oficios           Oficio[]
+  audiencias        Audiencia[]
+  documentos        Documento[]
+  tareas            Tarea[]
+  asignaciones      AsignacionProceso[]
+  historial         HistorialActuacion[]
+  archivos          ArchivoProceso[]
+  cuadernos         Cuaderno[]
+  providencias      Providencia[]
+  memoriales        Memorial[]
+
+  @@index([radicado])
+  @@index([demandante])
+  @@index([demandado])
+  @@index([estado])
+  @@index([categoriaProceso])
+  @@index([claseProceso])
+  @@map("procesos")
+}
+
+// Clasificación de procesos según la realidad colombiana
+enum CategoriaProceso {
+  CIVIL
+  CONSTITUCIONAL
+}
+
+enum ClaseProceso {
+  // PROCESOS CIVILES
+  EJECUTIVO_SINGULAR
+  EJECUTIVO_HIPOTECARIO
+  EJECUTIVO_PRENDARIO
+  ORDINARIO
+  VERBAL
+  VERBAL_SUMARIO
+  POSESORIO
+  LIQUIDACION
+  SUCESORIO
+  DIVISORIO
+  RENDICION_CUENTAS
+  TERCERIAS
+  
+  // ACCIONES CONSTITUCIONALES
+  TUTELA
+  HABEAS_CORPUS
+  HABEAS_DATA
+  ACCION_POPULAR
+  ACCION_DE_GRUPO
+  ACCION_DE_CUMPLIMIENTO
+  ACCION_DE_TUTELA_CONTRA_PROVIDENCIA
+}
+
+enum EstadoProceso {
+  ACTIVO
+  SUSPENDIDO
+  ARCHIVADO
+  TERMINADO
+  EN_EJECUCION
+}
+
+// ==================== DESPACHO: PROVIDENCIAS (AUTOS Y SENTENCIAS) ====================
+
+model Providencia {
+  id                String   @id @default(cuid())
+  procesoId         String
+  tipo              TipoProvidencia
+  numero            String?  // Número del auto o sentencia
+  fecha             DateTime @default(now())
+  asunto            String
+  contenido         String?  // Texto de la providencia
+  
+  // Flujo de trabajo del Despacho
+  estado            EstadoProvidencia @default(PROYECTADO)
+  proyectadoPorId   String   // Oficial Mayor que proyecta
+  fechaProyeccion   DateTime @default(now())
+  revisadoPorId     String?  // Otro funcionario que revisa (opcional)
+  fechaRevision     DateTime?
+  firmadoPorId      String?  // Juez que firma
+  fechaFirma        DateTime?
+  
+  // Datos adicionales
+  tipoAuto          TipoAuto?  // Si es auto, qué tipo
+  recursos          String?    // Recursos que proceden
+  notificado        Boolean @default(false)
+  fechaNotificacion DateTime?
+  observaciones     String?
+  edicionEstadoId   String?  // Lista / Estado N.º en que se publicó (notificación por estado)
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  proceso           Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  edicionEstado     EdicionEstado? @relation(fields: [edicionEstadoId], references: [id], onDelete: SetNull)
+  proyectadoPor     Usuario  @relation("ProyectadasPor", fields: [proyectadoPorId], references: [id])
+  revisadoPor       Usuario? @relation("RevisadasPor", fields: [revisadoPorId], references: [id])
+  firmadoPor        Usuario? @relation("FirmadasPor", fields: [firmadoPorId], references: [id])
+  oficios           Oficio[] @relation("OficiosOrdenados")
+
+  @@index([procesoId])
+  @@index([tipo])
+  @@index([estado])
+  @@index([fecha])
+  @@index([edicionEstadoId])
+  @@map("providencias")
+}
+
+enum TipoProvidencia {
+  AUTO
+  SENTENCIA
+}
+
+enum EstadoProvidencia {
+  PROYECTADO        // Proyectado por Oficial Mayor
+  EN_REVISION       // En revisión
+  CORRECCION        // Devuelto para corrección
+  PENDIENTE_FIRMA   // Listo para firma del Juez
+  FIRMADO           // Firmado por el Juez
+  NOTIFICADO        // Notificado a las partes
+}
+
+enum TipoAuto {
+  // AUTOS INTERLOCUTORIOS
+  ADMISORIO
+  INADMISORIO
+  RECONVENIENTE
+  SANEAMIENTO
+  PROBATORIO
+  APELACION
+  SUSPENSION
+  REANUDACION
+  ARCHIVO
+  LEVANTAMIENTO_MEDIDA
+  PRACTICA_PRUEBAS
+  NULIDAD
+  
+  // AUTOS DE SUSTANCIACIÓN
+  TRASLADO_DEMANDA
+  TRASLADO_EXCEPCIONES
+  FIJACION_FECHA_AUDIENCIA
+  NOMBRAMIENTO_PERITO
+  OFICIO
+  
+  // OTROS
+  INTERLOCUTORIO
+  DE_SUSTANCIACION
+  OTRO
+}
+
+// ==================== SECRETARÍA: MEMORIALES Y SOLICITUDES ====================
+
+model Memorial {
+  id                String   @id @default(cuid())
+  procesoId         String
+  tipo              TipoMemorial
+  numero            String?  // Número de radicación del memorial
+  fechaPresentacion DateTime @default(now())
+  presentante       String   // Quién presenta (parte o apoderado)
+  identificacion    String?  // CC/NIT del presentante
+  asunto            String
+  contenido         String?
+  folios            Int?     // Número de folios
+  anexos            String?  // Descripción de anexos
+  recibidoPorId     String?  // Funcionario que recibe
+  fechaRecibido     DateTime?
+  estado            EstadoMemorial @default(RADICADO)
+  respuesta         String?
+  observaciones     String?
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  proceso           Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  recibidoPor       Usuario? @relation("MemorialesRecibidosPor", fields: [recibidoPorId], references: [id])
+
+  @@index([procesoId])
+  @@index([tipo])
+  @@index([fechaPresentacion])
+  @@map("memoriales")
+}
+
+enum TipoMemorial {
+  DEMANDA
+  REFORMA_DEMANDA
+  CONTESTACION
+  EXCEPCIONES
+  RECONVENCIÓN
+  CONTESTACION_RECONVENCION
+  INCIDENTE
+  RECURSO_REPOSICION
+  RECURSO_APELACION
+  RECURSO_QUEJA
+  RECURSO_CASACION
+  SOLICITUD_PRUEBAS
+  ALEGATOS_CONCLUSION
+  DESISTIMIENTO
+  PODER
+  SUSTITUCION_PODER
+  OTRO
+}
+
+enum EstadoMemorial {
+  RADICADO
+  TRASLADADO
+  CONTESTADO
+  ARCHIVADO
+  DEVUELTO
+}
+
+// ==================== TÉRMINOS PROCESALES ====================
+
+model Termino {
+  id                String   @id @default(cuid())
+  procesoId         String
+  ubicacionId       String?  // Mesa de Secretaría que lo gestiona (Términos)
+  responsableId     String?  // Usuario responsable (opcional)
+  tipo              String   // Traslado demanda, Traslado excepciones, etc.
+  descripcion       String?
+  fechaInicio       DateTime
+  fechaVencimiento  DateTime
+  diasTermino       Int      // Días del término original
+  diasHabiles       Boolean  @default(true)
+  suspendido        Boolean  @default(false)
+  fechaSuspension   DateTime?
+  fechaReanudacion  DateTime?
+  completado        Boolean  @default(false)
+  fechaCompletado   DateTime?
+  observaciones     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  proceso           Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  ubicacion         Ubicacion? @relation(fields: [ubicacionId], references: [id], onDelete: SetNull)
+  responsable       Usuario? @relation("TerminosResponsable", fields: [responsableId], references: [id], onDelete: SetNull)
+
+  @@index([fechaVencimiento])
+  @@index([completado])
+  @@map("terminos")
+}
+
+// ==================== NOTIFICACIONES ====================
+
+model Notificacion {
+  id                String   @id @default(cuid())
+  procesoId         String
+  tipo              TipoNotificacion
+  destinatario      String
+  destinatarioId    String?  // NIT/CC
+  direccion         String?
+  email             String?
+  autoNotificar     String   // Auto que se notifica
+  fechaAuto         DateTime?
+  fechaEnvio        DateTime?
+  fechaEntrega      DateTime?
+  estado            EstadoNotificacion @default(PENDIENTE)
+  medio             MedioNotificacion
+  codigoRastreo     String?
+  intentos          Int      @default(0)
+  observaciones     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  proceso           Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  logs              NotificacionLog[]
+
+  @@index([estado])
+  @@index([fechaEnvio])
+  @@map("notificaciones")
+}
+
+enum TipoNotificacion {
+  PERSONAL
+  POR_AVISO
+  POR_ESTADO
+  ELECTRONICA
+  FIJACION_CARTEL
+}
+
+enum EstadoNotificacion {
+  PENDIENTE
+  EN_PROCESO
+  ENVIADA
+  ENTREGADA
+  FALLIDA
+  DEVUELTA
+}
+
+enum MedioNotificacion {
+  CORREO_ELECTRONICO
+  VENTANILLA_VIRTUAL
+  FISICO
+  ESTADO
+  CARTEL
+}
+
+model NotificacionLog {
+  id                String   @id @default(cuid())
+  notificacionId    String
+  usuarioId         String?
+  accion            String
+  descripcion       String?
+  fecha             DateTime @default(now())
+
+  notificacion      Notificacion @relation(fields: [notificacionId], references: [id], onDelete: Cascade)
+  usuario           Usuario? @relation(fields: [usuarioId], references: [id])
+
+  @@map("notificacion_logs")
+}
+
+// ==================== OFICIOS (SECRETARÍA) ====================
+
+model Oficio {
+  id                String   @id @default(cuid())
+  procesoId         String
+  ubicacionId       String?  // Mesa de Secretaría que lo gestiona (Oficios)
+  responsableId     String?  // Usuario responsable (opcional)
+  providenciaId     String?  // Providencia que ordenó el oficio (órdenes dadas a secretaría)
+  numero            String?  // Número del oficio
+  destinatario      String
+  destinatarioId    String?  // NIT
+  tipoDestinatario  TipoDestinatario
+  direccion         String?
+  email             String?
+  asunto            String
+  contenido         String?
+  fechaEnvio        DateTime?
+  fechaRespuesta    DateTime?
+  estado            EstadoOficio @default(PENDIENTE)
+  diasTranscurridos Int      @default(0)
+  respuesta         String?
+  observaciones     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  proceso           Proceso     @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  ubicacion         Ubicacion?  @relation(fields: [ubicacionId], references: [id], onDelete: SetNull)
+  responsable       Usuario?   @relation("OficiosResponsable", fields: [responsableId], references: [id], onDelete: SetNull)
+  providencia      Providencia? @relation("OficiosOrdenados", fields: [providenciaId], references: [id], onDelete: SetNull)
+
+  @@index([estado])
+  @@index([fechaEnvio])
+  @@index([providenciaId])
+  @@map("oficios")
+}
+
+enum TipoDestinatario {
+  ENTIDAD_PUBLICA
+  REGISTRO_INSTRUMENTOS
+  BANCO
+  NOTARIA
+  CAMARA_COMERCIO
+  OTRO
+}
+
+enum EstadoOficio {
+  PENDIENTE
+  ENVIADO
+  RESPONDIDO
+  SIN_RESPUESTA
+  RECHAZADO
+}
+
+// ==================== AUDIENCIAS ====================
+
+model Audiencia {
+  id                String   @id @default(cuid())
+  procesoId         String
+  juzgadoId         String
+  tipo              TipoAudiencia
+  fecha             DateTime
+  duracion          Int      @default(60) // Minutos
+  sala              String?
+  enlaceVirtual     String?
+  juez              String
+  secretario        String?
+  estado            EstadoAudiencia @default(PROGRAMADA)
+  fechaFin          DateTime?
+  acta              String?
+  observaciones     String?
+  motivoSuspension  String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  proceso           Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  juzgado           Juzgado  @relation(fields: [juzgadoId], references: [id])
+
+  @@index([fecha])
+  @@index([estado])
+  @@map("audiencias")
+}
+
+enum TipoAudiencia {
+  INICIAL
+  INSTRUCCION
+  JUZGAMIENTO
+  CONCILIACION
+  PRUEBAS
+  ESPECIAL
+}
+
+enum EstadoAudiencia {
+  PROGRAMADA
+  EN_CURSO
+  REALIZADA
+  SUSPENDIDA
+  CANCELADA
+  REPROGRAMADA
+}
+
+// ==================== DOCUMENTOS Y PLANTILLAS ====================
+
+model Documento {
+  id                String   @id @default(cuid())
+  procesoId         String
+  usuarioId         String?
+  plantillaId       String?
+  tipo              TipoDocumento
+  nombre            String
+  contenido         String?
+  archivoUrl        String?
+  generado          Boolean  @default(false)
+  fechaGeneracion   DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  proceso           Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  usuario           Usuario? @relation(fields: [usuarioId], references: [id])
+  plantilla         Plantilla? @relation(fields: [plantillaId], references: [id])
+
+  @@map("documentos")
+}
+
+enum TipoDocumento {
+  // DESPACHO
+  AUTO
+  SENTENCIA
+  
+  // SECRETARÍA
+  OFICIO
+  CONSTANCIA
+  AVISO_NOTIFICACION
+  CITACION_AUDIENCIA
+  ESTADO_JUZGADO
+  CERTIFICACION
+  
+  // PARTES
+  DEMANDA
+  MEMORIAL
+  PODER
+  PRUEBA
+  
+  OTRO
+}
+
+model Plantilla {
+  id                String   @id @default(cuid())
+  nombre            String   @unique
+  tipo              TipoDocumento
+  area              AreaJuzgado  // DESPACHO o SECRETARIA
+  contenido         String   // Contenido con variables {{variable}}
+  descripcion       String?
+  activa            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  documentos        Documento[]
+
+  @@map("plantillas")
+}
+
+// ==================== NOTIFICACIONES DEL SISTEMA ====================
+
+model NotificacionSistema {
+  id                String   @id @default(cuid())
+  tipo              TipoNotificacionSistema
+  titulo            String
+  mensaje           String
+  procesoId         String?
+  usuarioId         String?  // Usuario destinatario
+  datos             String?  // JSON con datos adicionales
+  leida             Boolean  @default(false)
+  fechaLeida        DateTime?
+  createdAt         DateTime @default(now())
+
+  @@index([leida])
+  @@index([createdAt])
+  @@index([usuarioId])
+  @@map("notificaciones_sistema")
+}
+
+enum TipoNotificacionSistema {
+  TERMINO_POR_VENCER
+  TERMINO_VENCIDO
+  NUEVA_AUDIENCIA
+  AUDIENCIA_PROXIMA
+  OFICIO_SIN_RESPUESTA
+  NUEVO_PROCESO
+  NOTIFICACION_FALLIDA
+  SISTEMA
+  NUEVA_TAREA
+  TAREA_VENCIDA
+  ASIGNACION_PROCESO
+  NUEVA_PROVIDENCIA
+  PROVIDENCIA_FIRMADA
+  NUEVO_MEMORIAL
+}
+
+// ==================== SISTEMA DE TAREAS INTERNAS ====================
+
+model Tarea {
+  id              String        @id @default(cuid())
+  procesoId       String
+  titulo          String
+  descripcion     String?
+  tipo            TipoTarea
+  prioridad       PrioridadTarea @default(MEDIA)
+  estado          EstadoTarea   @default(PENDIENTE)
+  area            AreaJuzgado   @default(SECRETARIA)  // Qué área debe ejecutarla
+  ubicacionId     String?       // Ubicación en Secretaría que debe ejecutarla
+  responsableId   String?
+  creadoPorId     String
+  fechaLimite     DateTime?
+  fechaCompletado DateTime?
+  fechaRecordatorio DateTime?
+  observaciones   String?
+  datos           String?       // JSON con datos adicionales
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  proceso         Proceso       @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  ubicacion       Ubicacion?    @relation(fields: [ubicacionId], references: [id], onDelete: SetNull)
+  responsable     Usuario?      @relation("TareasResponsable", fields: [responsableId], references: [id])
+  creadoPor       Usuario       @relation("TareasCreador", fields: [creadoPorId], references: [id])
+  historial       HistorialTarea[]
+
+  @@index([estado])
+  @@index([fechaLimite])
+  @@index([responsableId])
+  @@index([area])
+  @@map("tareas")
+}
+
+enum TipoTarea {
+  // TAREAS DE SECRETARÍA
+  NOTIFICACION
+  OFICIO
+  TRASLADO
+  EMPLAZAMIENTO
+  FIJACION_CARTEL
+  ESTADO
+  ARCHIVO
+  
+  // TAREAS DE DESPACHO
+  PROYECTAR_AUTO
+  PROYECTAR_SENTENCIA
+  REVISAR_PROVIDENCIA
+  FIRMAR_PROVIDENCIA
+  
+  // GENERALES
+  AUDIENCIA
+  MEMORIAL
+  PRUEBA
+  RECURSO
+  LIQUIDACION
+  OTRO
+}
+
+enum PrioridadTarea {
+  ALTA
+  MEDIA
+  BAJA
+  URGENTE
+}
+
+enum EstadoTarea {
+  PENDIENTE
+  EN_PROGRESO
+  COMPLETADA
+  CANCELADA
+  VENCIDA
+}
+
+model HistorialTarea {
+  id          String      @id @default(cuid())
+  tareaId     String
+  usuarioId   String
+  accion      String
+  descripcion String?
+  datosAnteriores String?  // JSON
+  datosNuevos     String?  // JSON
+  fecha       DateTime    @default(now())
+
+  tarea       Tarea       @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+
+  @@map("historial_tareas")
+}
+
+// ==================== ASIGNACIÓN DE CASOS ====================
+
+model AsignacionProceso {
+  id            String    @id @default(cuid())
+  procesoId     String
+  usuarioId     String
+  rol           RolAsignacion
+  fechaInicio   DateTime  @default(now())
+  fechaFin      DateTime?
+  activo        Boolean   @default(true)
+  observaciones String?
+  asignadoPor   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  proceso       Proceso   @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  usuario       Usuario   @relation(fields: [usuarioId], references: [id])
+
+  @@index([procesoId])
+  @@index([usuarioId])
+  @@index([activo])
+  @@map("asignaciones_proceso")
+}
+
+enum RolAsignacion {
+  // DESPACHO
+  JUEZ_TITULAR
+  OFICIAL_MAYOR_ENCARGADO
+  
+  // SECRETARÍA
+  SECRETARIO_ENCARGADO
+  ESCRIBIENTE_ASIGNADO
+  ASISTENTE_ASIGNADO
+  
+  // GENERAL
+  RESPONSABLE_PRINCIPAL
+  COLABORADOR
+  SUPERVISOR
+}
+
+// ==================== HISTORIAL DE ACTUACIONES (AUDIT LOG) ====================
+
+model HistorialActuacion {
+  id                 String    @id @default(cuid())
+  procesoId          String
+  usuarioId         String?
+  area              AreaJuzgado?  // DESPACHO o SECRETARIA
+  tipo              TipoActuacion
+  accion            String       // Tipo de actuación (ej: "Auto admite demanda")
+  descripcion       String?      // Anotación / observación (formato CPNU)
+  datos             String?      // JSON con detalles de la actuación
+  fechaInicioTermino DateTime?   // Fecha inicia término (CPNU)
+  fechaFinTermino   DateTime?    // Fecha finaliza término (CPNU)
+  ipOrigen          String?
+  userAgent         String?
+  anterior          String?      // JSON con estado anterior
+  nuevo             String?     // JSON con estado nuevo
+  fecha             DateTime    @default(now())  // Fecha registro
+
+  proceso           Proceso   @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+
+  @@index([procesoId])
+  @@index([fecha])
+  @@index([tipo])
+  @@index([area])
+  @@map("historial_actuaciones")
+}
+
+enum TipoActuacion {
+  // DESPACHO
+  CREACION_PROCESO
+  AUTO_PROFERIDO
+  SENTENCIA_PROFERIDA
+  PROVIDENCIA_FIRMADA
+  AUDIENCIA_REALIZADA
+  
+  // SECRETARÍA
+  MEMORIAL_RECIBIDO
+  NOTIFICACION_REALIZADA
+  OFICIO_ENVIADO
+  OFICIO_RECIBIDO
+  TRASLADO_EFECTUADO
+  EMPLAZAMIENTO
+  FIJACION_CARTEL
+  ARCHIVO_POR_REMISION
+  
+  // GENERAL
+  ACTUALIZACION_PROCESO
+  CAMBIO_ESTADO
+  INGRESO_DESPACHO
+  TAREA
+  ASIGNACION
+  DOCUMENTO
+  ARCHIVO
+  OBSERVACION
+  OTRO
+}
+
+// ==================== CUADERNOS (carpetas virtuales del expediente) ====================
+
+model Cuaderno {
+  id          String   @id @default(cuid())
+  procesoId   String
+  nombre      String   // Ej: Cuaderno principal, Cuaderno medidas cautelares, Cuaderno incidente de nulidad
+  orden       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  archivos    ArchivoProceso[]
+
+  @@index([procesoId])
+  @@map("cuadernos")
+}
+
+// ==================== REPOSITORIO DOCUMENTAL ====================
+
+model ArchivoProceso {
+  id              String          @id @default(cuid())
+  procesoId       String
+  cuadernoId      String?         // Cuaderno (carpeta virtual) donde va el archivo
+  carpeta         CarpetaArchivo  // Clasificación del archivo (para compatibilidad)
+  orden           Int             @default(0)  // Orden dentro del cuaderno
+  nombreOriginal  String
+  nombreArchivo   String          // Nombre en servidor
+  bucketKey       String?         // Ruta en bucket S3 (ej: expedientes/radicado/carpeta/archivo.pdf)
+  tipoMime        String
+  tamano          Int             // Bytes
+  version         Int             @default(1)
+  archivoPadreId  String?         // Para versiones anteriores
+  descripcion     String?
+  subidoPorId     String
+  etiquetas       String?         // JSON array
+  favorito        Boolean         @default(false)
+  eliminado       Boolean         @default(false)
+  fechaEliminacion DateTime?
+  eliminadoPorId  String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  proceso         Proceso         @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  cuaderno        Cuaderno?       @relation(fields: [cuadernoId], references: [id], onDelete: SetNull)
+  subidoPor       Usuario         @relation("ArchivosSubidor", fields: [subidoPorId], references: [id])
+  eliminadoPor    Usuario?        @relation("ArchivosEliminador", fields: [eliminadoPorId], references: [id])
+  archivoPadre    ArchivoProceso? @relation("ArchivoVersiones", fields: [archivoPadreId], references: [id])
+  versiones       ArchivoProceso[] @relation("ArchivoVersiones")
+
+  @@index([procesoId])
+  @@index([cuadernoId])
+  @@index([carpeta])
+  @@index([eliminado])
+  @@map("archivos_proceso")
+}
+
+enum CarpetaArchivo {
+  // DOCUMENTOS DE LAS PARTES
+  DEMANDA
+  CONTESTACION
+  MEMORIALES
+  PODERES
+  PRUEBAS
+  ALEGATOS
+  RECURSOS
+  ANEXOS
+  
+  // INGRESO Y REPARTO
+  ACTA_REPARTO
+  INFORME_INGRESO_DESPACHO
+  
+  // PROVIDENCIAS DEL DESPACHO
+  AUTOS
+  SENTENCIAS
+  
+  // GESTIÓN DE SECRETARÍA
+  OFICIOS
+  NOTIFICACIONES
+  CITACIONES
+  CONSTANCIAS
+  ESTADOS
+  
+  // OTROS
+  OTROS
+}
