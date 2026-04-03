@@ -68,4 +68,6 @@ server.log
 # Archivos subidos en desarrollo
 /uploads/*
 !/uploads/.gitkeep
+!/uploads/ejemplos/
+!/uploads/ejemplos/**
 /upload/*

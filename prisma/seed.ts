@@ -13,7 +13,7 @@ async function main() {
   if (!juzgado) {
     juzgado = await prisma.juzgado.create({
       data: {
-        nombre: 'Juzgado Civil del Circuito 31 - Despacho 051',
+        nombre: 'JUZGADO 051 CIVIL DEL CIRCUITO DE BOGOTÁ',
         codigo: '11-031-CIV-051',
         codigoRadicacion12: '110013103051',
         tipoJuzgado: TipoJuzgado.CIVIL_CIRCUITO,
@@ -25,7 +25,11 @@ async function main() {
     });
     console.log('✅ Juzgado creado:', juzgado.nombre);
   } else {
-    console.log('✅ Juzgado existente:', juzgado.nombre);
+    juzgado = await prisma.juzgado.update({
+      where: { id: juzgado.id },
+      data: { nombre: 'JUZGADO 051 CIVIL DEL CIRCUITO DE BOGOTÁ' },
+    })
+    console.log('✅ Juzgado existente (nombre alineado CPNU):', juzgado.nombre);
   }
 
   // ==================== TIPOS DE PROCESO - BORRAR ANTERIORES Y RECREAR ====================
@@ -211,13 +215,13 @@ async function main() {
   console.log('   SECRETARÍA: Secretario, 2 Escribientes, 1 Asistente');
   console.log('   SUPER_ADMIN: Administrador del Sistema');
 
-  // ==================== PROCESOS JUDICIALES (30 civiles + 10 tutelas, primera instancia - radicado termina en 00) ====================
+  // ==================== PROCESOS JUDICIALES (30 civiles + 10 tutelas + tutela ejemplo EML 2026-300, primera instancia - radicado termina en 00) ====================
   
   // Eliminar procesos existentes para recrear con datos de ejemplo (cascade elimina cuadernos, providencias, etc.)
   await prisma.proceso.deleteMany({ where: { juzgadoId: juzgado.id } });
 
   const CODIGO12 = '110013103051';
-  const ANIO = 2025;
+  const ANIO = 2026;
   const oficiales = [oficialMayor1.id, oficialMayor2.id];
 
   const getTipoEst = (clase: ClaseProceso, demanda: string): string | undefined => {
@@ -340,12 +344,78 @@ async function main() {
     procesosCreados.push({ id: p.id, radicado: p.radicado, claseProceso: p.claseProceso });
   }
 
+  // Expediente de referencia 2026-300 — mismo contenido que el correo ejemplo (.eml); radicado 23 dígitos: 11001…2026…00300…00
+  const radicadoTutela2026_300 = `${CODIGO12}${ANIO}0030000`;
+  const tutelaEjemploEml = await prisma.proceso.create({
+    data: {
+      radicado: radicadoTutela2026_300,
+      instancia: TipoInstancia.PRIMERA_INSTANCIA,
+      categoriaProceso: CategoriaProceso.CONSTITUCIONAL,
+      claseProceso: ClaseProceso.TUTELA,
+      tipoProcesoEstadisticaId: tipoTutelaOtros,
+      demanda:
+        'Acción de tutela (ejemplo) — EJEMPLO ACCIONANTE vs ENTIDAD EJEMPLO. Derecho: DEBIDO PROCESO. Expediente de trabajo 2026-300.',
+      demandante: 'EJEMPLO ACCIONANTE',
+      demandado: 'ENTIDAD EJEMPLO',
+      estado: EstadoProceso.ACTIVO,
+      etapaProcesal: 'Admisión',
+      observaciones:
+        'Expediente de referencia 2026-300 (año 2026, consecutivo 00300, primera instancia 00). Correlacionado con el .eml de ejemplo; ref. trámite web 202600358 no es el radicado.',
+      juzgadoId: juzgado.id,
+      oficialMayorId: oficiales[0],
+      secretarioId: secretario.id,
+      fechaEntradaDespacho: new Date(),
+      fechaLimiteDespacho: new Date(Date.now() + 8 * 24 * 60 * 60 * 1000),
+    },
+  });
+  await prisma.cuaderno.create({ data: { procesoId: tutelaEjemploEml.id, nombre: 'Cuaderno principal', orden: 0 } });
+  procesosCreados.push({
+    id: tutelaEjemploEml.id,
+    radicado: tutelaEjemploEml.radicado,
+    claseProceso: tutelaEjemploEml.claseProceso,
+  });
+
   const proceso1 = (await prisma.proceso.findUnique({ where: { radicado: `${CODIGO12}${ANIO}0000100` } }))!;
   const proceso2 = (await prisma.proceso.findUnique({ where: { radicado: `${CODIGO12}${ANIO}0000200` } }))!;
   const proceso3 = (await prisma.proceso.findUnique({ where: { radicado: `${CODIGO12}${ANIO}0003100` } }))!; // Primera tutela
   const proceso4 = (await prisma.proceso.findUnique({ where: { radicado: `${CODIGO12}${ANIO}0000400` } }))!;
 
-  console.log('✅ Procesos creados: 30 civiles + 10 tutelas (radicados terminan en 00 = primera instancia)');
+  // Datos alineados a la consulta pública CPNU (mismos rubros que consultaprocesos.ramajudicial.gov.co)
+  const radicadoCivilCpnu = `${CODIGO12}${ANIO}0000400` // 4.º civil — ejemplo tipo portal (ejecutivo)
+  await prisma.proceso.updateMany({
+    where: { radicado: radicadoCivilCpnu },
+    data: {
+      fechaRadicacion: new Date('2026-02-02'),
+      consultaDespacho: 'JUZGADO 051 CIVIL DEL CIRCUITO DE BOGOTÁ',
+      consultaPonente: 'JUEZ 51 CIVIL DEL CIRCUITO',
+      consultaTipoProceso: 'DE EJECUCIÓN',
+      consultaClaseProceso: 'EJECUTIVO MIXTO',
+      consultaSubclaseProceso: 'POR SUMAS DE DINERO',
+      consultaRecurso: 'SIN TIPO DE RECURSO',
+      consultaUbicacionExpediente: 'SECRETARIA - LETRA',
+    },
+  })
+
+  const radicadoTutelaCpnu = `${CODIGO12}${ANIO}0004000` // tutela 40 — Roberto Torres vs Secretaría (misma nomenclatura CPNU)
+  await prisma.proceso.updateMany({
+    where: { radicado: radicadoTutelaCpnu },
+    data: {
+      fechaRadicacion: new Date('2026-01-20'),
+      consultaDespacho: 'JUZGADO 051 CIVIL DEL CIRCUITO DE BOGOTÁ',
+      consultaPonente: 'JUEZ 51 CIVIL DEL CIRCUITO',
+      consultaTipoProceso: 'CONSTITUCIONAL',
+      consultaClaseProceso: 'ACCION DE TUTELA',
+      consultaSubclaseProceso: 'DERECHO A LA INFORMACIÓN PÚBLICA',
+      consultaRecurso: 'SIN TIPO DE RECURSO',
+      consultaUbicacionExpediente: 'SECRETARIA - LETRA',
+    },
+  })
+
+  console.log(
+    '✅ Procesos creados: 30 civiles + 10 tutelas + tutela ejemplo EML expediente 2026-300 (' +
+      radicadoTutela2026_300 +
+      ')'
+  );
 
   // ==================== PROVIDENCIAS (DESPACHO) ====================
   
@@ -923,7 +993,7 @@ Secretario {{tipo_juzgado}}`,
   console.log('\n📊 RESUMEN:');
   console.log('├── Juzgado: 1');
   console.log('├── Usuarios: 8 (Despacho: 3, Secretaría: 4, Super Admin: 1)');
-  console.log('├── Procesos: 40 (30 civiles + 10 tutelas, primera instancia - radicado termina en 00)');
+  console.log('├── Procesos: 41 (30 civiles + 10 tutelas + 1 tutela ejemplo 2026-300, primera instancia - radicado termina en 00)');
   console.log('├── Providencias: 4 (Autos: 3, Sentencias: 1)');
   console.log('├── Memoriales: 3');
   console.log('├── Oficios: 3');

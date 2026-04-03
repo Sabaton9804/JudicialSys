@@ -92,6 +92,10 @@ export default function GuiaPage() {
           <CardContent className="space-y-2 text-sm">
             <p><Link href="/" className="text-blue-600 hover:underline">/</Link> — Gestor (página principal)</p>
             <p><Link href="/publicaciones" className="text-blue-600 hover:underline">/publicaciones</Link> — Consulta de procesos (sin sesión)</p>
+            <p>
+              <Link href="/ejemplos/tutela-eml" className="text-blue-600 hover:underline">/ejemplos/tutela-eml</Link> —{' '}
+              Ejemplo <code className="bg-slate-100 px-1 rounded text-xs">RV_Generacion_Tutela_en_linea_No_202600358.eml</code> (descarga e instrucciones)
+            </p>
           </CardContent>
         </Card>
 

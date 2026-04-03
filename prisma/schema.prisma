@@ -198,6 +198,16 @@ model Proceso {
   tipoProcesoEstadisticaId String?  // Tipo para estadística oficial (configurable por juzgado)
   fechaEntradaDespacho DateTime?  // Cuándo ingresó al Despacho (asignación)
   fechaLimiteDespacho  DateTime?  // Fecha límite para que el oficial proyecte
+
+  // Alineación con la consulta pública CPNU (mismos textos que consultaprocesos.ramajudicial.gov.co)
+  consultaDespacho              String?  // ej. JUZGADO 051 CIVIL DEL CIRCUITO DE BOGOTÁ
+  consultaPonente               String?  // ej. JUEZ 51 CIVIL DEL CIRCUITO
+  consultaTipoProceso           String?  // ej. DE EJECUCIÓN
+  consultaClaseProceso          String?  // ej. EJECUTIVO MIXTO
+  consultaSubclaseProceso       String?  // ej. POR SUMAS DE DINERO
+  consultaRecurso               String?  // ej. SIN TIPO DE RECURSO
+  consultaUbicacionExpediente   String?  // ej. SECRETARIA - LETRA
+
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

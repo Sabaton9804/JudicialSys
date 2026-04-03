@@ -1,15 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import JSZip from 'jszip'
-import { extraerTexto } from '@/lib/extract-documento'
-import {
-  crearProcesoDesdeImportacion,
-  clasificarCarpetaNombre,
-  nombreBaseActaRepartoSiEsSecPdf,
-} from '@/lib/proceso-import-shared'
+import { crearProcesoDesdeImportacion } from '@/lib/proceso-import-shared'
+import { prepararImportacionDesdeEml } from '@/lib/eml-preparar-importacion'
 import { extraerRadicadoPreferidoDesdeTextosImportacion } from '@/lib/radicado-expediente'
 import { getUserFromHeader } from '@/lib/auth-utils'
-
-const EXT_EXTRACTIBLE = ['.pdf', '.doc', '.docx', '.txt']
 
 const CODIGO_JUZGADO_DEFAULT = '11-031-CIV-051'
 const CODIGO12_DEFAULT = '110013103051'
@@ -21,12 +14,12 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File | null
 
     if (!file || file.size === 0) {
-      return NextResponse.json({ success: false, error: 'Seleccione un archivo ZIP' }, { status: 400 })
+      return NextResponse.json({ success: false, error: 'Seleccione un archivo .eml' }, { status: 400 })
     }
 
     const ext = file.name.split('.').pop()?.toLowerCase()
-    if (ext !== 'zip') {
-      return NextResponse.json({ success: false, error: 'El archivo debe ser un ZIP (.zip)' }, { status: 400 })
+    if (ext !== 'eml') {
+      return NextResponse.json({ success: false, error: 'El archivo debe ser un correo (.eml)' }, { status: 400 })
     }
 
     let juzgadoFinal = user?.juzgadoId || null
@@ -67,40 +60,20 @@ export async function POST(request: NextRequest) {
     }
 
     const bytes = await file.arrayBuffer()
-    const zip = await JSZip.loadAsync(bytes)
-    const textos: string[] = []
-    const archivosParaGuardar: {
-      nombre: string
-      buffer: Buffer
-      carpeta: ReturnType<typeof clasificarCarpetaNombre>
-    }[] = []
-
-    for (const [nombreRel, entry] of Object.entries(zip.files)) {
-      if (entry.dir) continue
-      const buffer = Buffer.from(await entry.async('arraybuffer'))
-      const leaf = nombreRel.split('/').pop() || nombreRel
-      const nombre = nombreBaseActaRepartoSiEsSecPdf(leaf)
-      const carpeta = clasificarCarpetaNombre(nombre)
-
-      archivosParaGuardar.push({ nombre, buffer, carpeta })
-
-      if (EXT_EXTRACTIBLE.some((e) => nombre.toLowerCase().endsWith(e))) {
-        const texto = await extraerTexto(buffer, nombre)
-        if (texto) textos.push(texto)
-      }
-    }
+    const buffer = Buffer.from(bytes)
+    const prep = await prepararImportacionDesdeEml(buffer, file.name)
 
     const juzgadoRow = await db.juzgado.findUnique({ where: { id: juzgadoFinal } })
     const codigo12 = (juzgadoRow?.codigoRadicacion12?.replace(/\D/g, '') || CODIGO12_DEFAULT).slice(0, 12)
-    const radicadoPreferido = extraerRadicadoPreferidoDesdeTextosImportacion(textos, codigo12)
+    const radicadoPreferido = extraerRadicadoPreferidoDesdeTextosImportacion(prep.textosParaParseo, codigo12)
 
     const result = await crearProcesoDesdeImportacion({
-      archivosParaGuardar,
-      textosParaParseo: textos,
+      archivosParaGuardar: prep.archivos,
+      textosParaParseo: prep.textosParaParseo,
       juzgadoId: juzgadoFinal,
       subidoPorId,
-      observacionesOrigen: 'Importado desde ZIP de reparto',
-      forzarTutela: false,
+      observacionesOrigen: `Importado desde correo (.eml): ${file.name}`,
+      forzarTutela: prep.forzarTutela,
       radicadoPreferido,
     })
 
@@ -114,11 +87,11 @@ export async function POST(request: NextRequest) {
         fusionadoEnExpedienteExistente: result.fusionadoEnExpedienteExistente,
       },
       message: result.fusionadoEnExpedienteExistente
-        ? `Importación vinculada al expediente ${result.proceso.radicado} (${result.archivosSubidos} archivo(s))`
+        ? `Documentos importados al expediente local ${result.proceso.radicado} (${result.archivosSubidos} archivo(s))`
         : `Proceso ${result.proceso.radicado} creado con ${result.archivosSubidos} archivo(s)`,
     })
   } catch (error) {
-    console.error('Error importando reparto:', error)
+    console.error('Error creando proceso desde .eml:', error)
     return NextResponse.json(
       { success: false, error: String(error instanceof Error ? error.message : 'Error al importar') },
       { status: 500 }

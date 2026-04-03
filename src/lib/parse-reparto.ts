@@ -8,11 +8,32 @@ export interface DatosExtraidos {
   demanda?: string
   radicado?: string
   cuantia?: number
+  /** Valor del enum `ClaseProceso` en Prisma (ej. TUTELA, ORDINARIO). */
   claseProceso?: string
   observaciones?: string
+  /** Tipo o subtipo según el escrito (texto libre: ej. tutela por salud, ejecución singular). */
+  tipoProcesoDescripcion?: string
+  /** En tutela: derechos constitucionales invocados. */
+  derechosVulnerados?: string
+  /** Síntesis de pretensiones o petitorio. */
+  pretensiones?: string
+  /** CC, NIT o documento del demandante/accionante si consta. */
+  documentoDemandante?: string
+  /** CC, NIT o documento del demandado/accionado si consta. */
+  documentoDemandado?: string
+  /** Otros datos relevantes en una sola cadena (IA). */
+  observacionesExtraccion?: string
 }
 
 const PATRONES = {
+  accionante: [
+    /(?:accionante|accionantes)\s*[:\-]\s*([^\n\r]+)/i,
+    /(?:accionante|accionantes)\s*<\/strong>\s*:\s*([^\n\r<]+)/i,
+  ],
+  accionado: [
+    /(?:accionado|accionados)\s*[:\-]\s*([^\n\r]+)/i,
+    /(?:accionado|accionados)\s*<\/strong>\s*:\s*([^\n\r<]+)/i,
+  ],
   demandante: [
     /(?:demandante|actor|peticionario)\s*[:\-]\s*([^\n\r]+)/i,
     /(?:señor(?:a)?|sr\.?|sra\.?)\s+([A-ZÁÉÍÓÚÑa-záéíóúñ\s\.]+(?:S\.?A\.?S\.?|S\.?A\.?|LTDA\.?|INC\.?)?)/,
@@ -79,8 +100,12 @@ export function parsearTextoDocumentos(textos: string[]): DatosExtraidos {
 
   const demandante = extraerPrimerMatch(textoCompleto, PATRONES.demandante)
   const demandado = extraerPrimerMatch(textoCompleto, PATRONES.demandado)
+  const accionante = extraerPrimerMatch(textoCompleto, PATRONES.accionante)
+  const accionado = extraerPrimerMatch(textoCompleto, PATRONES.accionado)
   if (demandante) datos.demandante = demandante
+  else if (accionante) datos.demandante = accionante
   if (demandado) datos.demandado = demandado
+  else if (accionado) datos.demandado = accionado
 
   const demanda = extraerPrimerMatch(textoCompleto, PATRONES.demanda)
   if (demanda) datos.demanda = demanda

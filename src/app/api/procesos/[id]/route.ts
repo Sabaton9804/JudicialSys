@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getUserFromHeader, juzgadoWhere } from '@/lib/auth-utils'
+import { mergeConsultaCpnuDesdeDb } from '@/lib/cpnu/client'
 
 // Include base para proceso (sin cuadernos - por si el schema no está actualizado)
 const includeBase = {
@@ -90,6 +91,8 @@ export async function GET(
     if (!(proceso as any).cuadernos) {
       (proceso as any).cuadernos = []
     }
+
+    await mergeConsultaCpnuDesdeDb(db, proceso as Record<string, unknown>, id)
 
     return NextResponse.json({
       success: true,

@@ -17,7 +17,7 @@ import { toast, Toaster } from 'sonner'
 import { 
   AlertTriangle, Bell, Calendar, Clock, FileText, Gavel, Home, Mail, Menu,
   Search, Users, Building2, CheckCircle2, XCircle, AlertCircle, Timer,
-  Send, Plus, RefreshCw, Wifi, WifiOff, Download, Eye, Upload,   FolderOpen, File,
+  Send, Plus, RefreshCw, Wifi, WifiOff, Download, Eye, Upload,   FolderOpen, File, ListOrdered,
   ClipboardList, UserPlus, History, Archive, Briefcase, Play, CheckSquare, BarChart3,
   MessageSquare, PenTool, BookOpen, Scale, FileSignature, Shield, Pencil, MapPin, Trash2, ExternalLink
 } from 'lucide-react'
@@ -208,8 +208,17 @@ export default function GestorSecretariaJudicial() {
   const [showIngresarDespacho, setShowIngresarDespacho] = useState(false)
   const [procesoParaIngresar, setProcesoParaIngresar] = useState<any>(null)
   const [showCrearExpediente, setShowCrearExpediente] = useState(false)
-  const [crearExpedienteTab, setCrearExpedienteTab] = useState<'reparto' | 'manual'>('reparto')
+  const [crearExpedienteTab, setCrearExpedienteTab] = useState<'reparto' | 'orden' | 'manual'>('reparto')
   const [importandoReparto, setImportandoReparto] = useState(false)
+  const [importandoEmlTutela, setImportandoEmlTutela] = useState(false)
+  const [preparandoOrdenDoc, setPreparandoOrdenDoc] = useState(false)
+  const [descargandoPaqueteEml, setDescargandoPaqueteEml] = useState(false)
+  const [resultadoPrepararOrden, setResultadoPrepararOrden] = useState<{
+    orden: Array<{ orden: number; rol: string; etiqueta: string; nombre: string; origen?: string; tamanoBytes?: number }>
+    advertencias: string[]
+    descripcionOrden?: string
+    instruccionesOutlook?: string
+  } | null>(null)
   const [usuarioEditando, setUsuarioEditando] = useState<UsuarioAdmin | null>(null)
   const [showUbicacionesJuzgado, setShowUbicacionesJuzgado] = useState(false)
   const [juzgadoParaUbicaciones, setJuzgadoParaUbicaciones] = useState<JuzgadoAdmin | null>(null)
@@ -1033,7 +1042,7 @@ export default function GestorSecretariaJudicial() {
       const fd = new FormData()
       fd.append('file', file)
       const res = await apiFetch('/api/reparto/import', { method: 'POST', body: fd }, simulatedUser?.id)
-      const data = await parseJsonResponse<{ success?: boolean; data?: { proceso: { radicado: string }; archivosSubidos: number; datosExtraidos: any }; error?: string }>(res)
+      const data = await parseJsonResponse<{ success?: boolean; data?: { proceso: { id: string; radicado: string }; archivosSubidos: number; datosExtraidos: unknown }; error?: string }>(res)
       if (data?.success && data.data) {
         toast.success(`Proceso ${data.data.proceso.radicado} creado con ${data.data.archivosSubidos} archivo(s)`)
                 setShowCrearExpediente(false)
@@ -1050,6 +1059,147 @@ export default function GestorSecretariaJudicial() {
       toast.error('Error al importar desde reparto')
     } finally {
       setImportandoReparto(false)
+    }
+  }
+
+  const handleCrearProcesoDesdeEml = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const form = e.currentTarget
+    const fileInput =
+      (form.querySelector('#tutela-eml-file') as HTMLInputElement) ||
+      (form.querySelector('input[name="file"]') as HTMLInputElement)
+    const file = fileInput?.files?.[0]
+    if (!file) {
+      toast.error('Seleccione un archivo .eml')
+      return
+    }
+    if (!file.name.toLowerCase().endsWith('.eml')) {
+      toast.error('El archivo debe ser un correo (.eml)')
+      return
+    }
+    setImportandoEmlTutela(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await apiFetch('/api/tutela/crear-desde-eml', { method: 'POST', body: fd }, simulatedUser?.id)
+      const data = await parseJsonResponse<{
+        success?: boolean
+        data?: {
+          proceso: { id: string; radicado: string }
+          archivosSubidos: number
+          datosExtraidos: unknown
+          fusionadoEnExpedienteExistente?: boolean
+        }
+        error?: string
+      }>(res)
+      if (data?.success && data.data) {
+        const fus = data.data.fusionadoEnExpedienteExistente
+        toast.success(
+          fus
+            ? `Expediente local ${data.data.proceso.radicado}: importación añadida (${data.data.archivosSubidos} archivo(s)). SGDE es aparte.`
+            : `Proceso ${data.data.proceso.radicado} creado con ${data.data.archivosSubidos} archivo(s)`
+        )
+        fileInput.value = ''
+        fetchTutelas()
+        fetchDashboard()
+        if (data.data.proceso?.id) openExpediente(data.data.proceso.id)
+      } else {
+        toast.error((data as { error?: string })?.error || 'Error al crear proceso desde el correo', { duration: 6000 })
+      }
+    } catch {
+      toast.error('Error al crear proceso desde el correo')
+    } finally {
+      setImportandoEmlTutela(false)
+    }
+  }
+
+  const handlePrepararOrdenDocumentos = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const form = e.currentTarget
+    const fileInput = form.querySelector('input[type="file"]') as HTMLInputElement
+    const files = fileInput?.files
+    if (!files?.length) {
+      toast.error('Seleccione al menos un archivo (.zip, .pdf, .eml)')
+      return
+    }
+    setPreparandoOrdenDoc(true)
+    setResultadoPrepararOrden(null)
+    try {
+      const fd = new FormData()
+      for (let i = 0; i < files.length; i++) {
+        fd.append('archivo', files[i])
+      }
+      const res = await apiFetch('/api/tutela/preparar-orden', { method: 'POST', body: fd }, simulatedUser?.id)
+      const data = await parseJsonResponse<{
+        success?: boolean
+        orden?: Array<{ orden: number; rol: string; etiqueta: string; nombre: string; origen?: string; tamanoBytes?: number }>
+        advertencias?: string[]
+        error?: string
+        descripcionOrden?: string
+        instruccionesOutlook?: string
+      }>(res)
+      if (data?.success && data.orden) {
+        setResultadoPrepararOrden({
+          orden: data.orden,
+          advertencias: data.advertencias ?? [],
+          descripcionOrden: data.descripcionOrden,
+          instruccionesOutlook: data.instruccionesOutlook,
+        })
+        toast.success('Orden de documentos generada')
+      } else {
+        toast.error((data as { error?: string })?.error || 'No se pudo generar el orden')
+      }
+    } catch {
+      toast.error('Error al preparar orden')
+    } finally {
+      setPreparandoOrdenDoc(false)
+    }
+  }
+
+  const handleDescargarPaqueteEml = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const form = e.currentTarget
+    const fileInput = form.querySelector('input[name="emlPaquete"]') as HTMLInputElement
+    const file = fileInput?.files?.[0]
+    if (!file) {
+      toast.error('Seleccione el archivo .eml descargado de Outlook')
+      return
+    }
+    if (!file.name.toLowerCase().endsWith('.eml')) {
+      toast.error('El archivo debe ser .eml')
+      return
+    }
+    setDescargandoPaqueteEml(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await apiFetch('/api/tutela/eml-paquete', { method: 'POST', body: fd }, simulatedUser?.id)
+      if (!res.ok) {
+        const text = await res.text()
+        try {
+          const j = JSON.parse(text) as { error?: string }
+          toast.error(j.error || 'Error al generar el paquete')
+        } catch {
+          toast.error('Error al generar el paquete')
+        }
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const dispo = res.headers.get('Content-Disposition')
+      const m = dispo?.match(/filename="([^"]+)"/)
+      a.download = m?.[1] || `${file.name.replace(/\.eml$/i, '')}_paquete_documentos.zip`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast.success('ZIP descargado: PDF del correo + demanda/anexos en secuencia')
+    } catch {
+      toast.error('Error al descargar el paquete')
+    } finally {
+      setDescargandoPaqueteEml(false)
     }
   }
 
@@ -2576,6 +2726,74 @@ export default function GestorSecretariaJudicial() {
                   Protección inmediata de derechos constitucionales fundamentales. Fallo de inmediato cumplimiento.
                 </p>
               </div>
+              <Card className="border-emerald-400 bg-gradient-to-b from-emerald-50/90 to-white shadow-md ring-1 ring-emerald-200/80">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg text-emerald-950">1. Cargar el correo y crear el expediente (lo que pediste)</CardTitle>
+                  <CardDescription className="text-emerald-950/90 text-sm">
+                    Elige el archivo <strong>.eml</strong> (exportado desde Outlook o descargado) y pulsa el botón. El sistema <strong>lee el mensaje y adjuntos</strong>, rellena demandante/demandado/objeto cuando puede, <strong>crea la tutela</strong> en la base de datos con <strong>radicado de 23 dígitos</strong> y guarda los archivos en el expediente. Luego te abre el expediente.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-5 pt-0">
+                  <form
+                    onSubmit={handleCrearProcesoDesdeEml}
+                    className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-end gap-3 rounded-xl border-2 border-emerald-500/40 bg-white p-4 shadow-sm"
+                  >
+                    <div className="flex flex-col gap-2 min-w-[220px] flex-1">
+                      <label htmlFor="tutela-eml-file" className="text-sm font-semibold text-emerald-950">
+                        Archivo de correo (.eml)
+                      </label>
+                      <Input
+                        id="tutela-eml-file"
+                        name="file"
+                        type="file"
+                        accept=".eml,.EML"
+                        required
+                        disabled={importandoEmlTutela}
+                        className="text-sm cursor-pointer"
+                      />
+                      <p className="text-xs text-gray-600">
+                        Sin adjuntos también funciona: se usan accionante/accionado y texto del cuerpo del correo.
+                      </p>
+                    </div>
+                    <Button
+                      type="submit"
+                      size="lg"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white shrink-0 sm:min-w-[200px]"
+                      disabled={importandoEmlTutela}
+                    >
+                      {importandoEmlTutela ? 'Creando tutela…' : 'Crear expediente desde este .eml'}
+                    </Button>
+                  </form>
+                  <div className="rounded-lg border border-cyan-200 bg-cyan-50/60 px-3 py-2 text-sm text-cyan-950">
+                    <p className="font-medium text-cyan-900 mb-1">Expediente de ejemplo en base de datos: 2026-300</p>
+                    <p className="text-cyan-950/90 text-xs leading-relaxed">
+                      Tras <code className="text-[11px] bg-white px-1 rounded">npx tsx prisma/seed.ts</code> existe la tutela <strong>2026-300</strong> con radicado{' '}
+                      <span className="font-mono text-[11px]">11001310305120260030000</span> (mismas partes que el .eml). El <strong>No 202600358</strong> del portal sigue siendo solo la <strong>referencia del trámite web</strong>.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 pt-1 border-t border-gray-200">
+                    <a
+                      href="/ejemplos/RV_Generacion_Tutela_en_linea_No_202600358.eml"
+                      download="RV_Generacion_Tutela_en_linea_No_202600358.eml"
+                      className="inline-flex items-center rounded-md border border-cyan-600 bg-white px-3 py-2 text-sm font-medium text-cyan-800 hover:bg-cyan-50"
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Descargar .eml de ejemplo
+                    </a>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-cyan-600 text-cyan-900 hover:bg-cyan-100"
+                      onClick={() => {
+                        setShowCrearExpediente(true)
+                        setCrearExpedienteTab('orden')
+                      }}
+                    >
+                      Generar paquete ZIP (otra utilidad)
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
               <div className="flex justify-between items-center gap-2">
                 <p className="text-sm text-gray-500">{procesos.length} tutela{procesos.length !== 1 ? 's' : ''} en trámite</p>
                 <div className="flex gap-2">
@@ -3414,7 +3632,7 @@ export default function GestorSecretariaJudicial() {
             </div>
             <div className="space-y-2">
               <Label>Número (opcional)</Label>
-              <Input name="numero" placeholder="Ej. 001-2025" />
+              <Input name="numero" placeholder="Ej. 001-2026" />
             </div>
             <div className="space-y-2">
               <Label>Contenido (opcional)</Label>
@@ -3805,28 +4023,38 @@ export default function GestorSecretariaJudicial() {
       </Dialog>
 
       {/* Dialog Crear expediente */}
-      <Dialog open={showCrearExpediente} onOpenChange={(o) => { setShowCrearExpediente(o); if (!o) setImportandoReparto(false); }}>
-        <DialogContent className="sm:max-w-[560px]">
+      <Dialog open={showCrearExpediente} onOpenChange={(o) => {
+        setShowCrearExpediente(o)
+        if (!o) {
+          setImportandoReparto(false)
+          setResultadoPrepararOrden(null)
+        }
+      }}>
+        <DialogContent className="sm:max-w-[640px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Plus className="w-5 h-5 text-amber-600" />
               Crear expediente
             </DialogTitle>
             <DialogDescription>
-              Cargue el ZIP de reparto para extraer los datos automáticamente, o ingrese los datos manualmente.
+              Tres pasos visibles: (1) ZIP para crear expediente en el sistema, (2) orden de documentos para reparto/tutela antes de SGDE, (3) datos manuales.
             </DialogDescription>
           </DialogHeader>
-          <Tabs value={crearExpedienteTab} onValueChange={(v) => setCrearExpedienteTab(v as 'reparto' | 'manual')}>
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="reparto">Cargar desde reparto</TabsTrigger>
-              <TabsTrigger value="manual">Datos manuales</TabsTrigger>
+          <Tabs value={crearExpedienteTab} onValueChange={(v) => setCrearExpedienteTab(v as 'reparto' | 'orden' | 'manual')}>
+            <TabsList className="grid w-full grid-cols-1 gap-1 sm:grid-cols-3 h-auto sm:h-10">
+              <TabsTrigger value="reparto" className="text-xs sm:text-sm">ZIP → expediente</TabsTrigger>
+              <TabsTrigger value="orden" className="text-xs sm:text-sm gap-1">
+                <ListOrdered className="w-3.5 h-3.5 shrink-0 hidden sm:inline" />
+                Orden documentos
+              </TabsTrigger>
+              <TabsTrigger value="manual" className="text-xs sm:text-sm">Datos manuales</TabsTrigger>
             </TabsList>
             <TabsContent value="reparto" className="mt-4">
               <form onSubmit={handleImportarReparto} className="space-y-4">
                 <div className="space-y-2">
                   <Label>Archivo ZIP de reparto</Label>
                   <Input type="file" accept=".zip" required disabled={importandoReparto} />
-                  <p className="text-xs text-gray-500">Documentos, acta de reparto, informe. Se extraen demandante, demandado, demanda y se crea el expediente.</p>
+                  <p className="text-xs text-gray-500">Un solo .zip con PDF del acta, demanda, pruebas, informe, etc. Se crea el proceso en JudicialSys y se guardan los archivos por carpeta.</p>
                 </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setShowCrearExpediente(false)} disabled={importandoReparto}>Cancelar</Button>
@@ -3835,6 +4063,88 @@ export default function GestorSecretariaJudicial() {
                   </Button>
                 </DialogFooter>
               </form>
+            </TabsContent>
+            <TabsContent value="orden" className="mt-4 space-y-4">
+              <p className="text-sm text-gray-600">
+                <strong>Opción A — Solo .eml (recomendado):</strong> descargue el mensaje completo desde Outlook y genere un ZIP con el <strong>PDF del correo</strong> (constancia), el <strong>índice de secuencia</strong> y los archivos <strong>renumerados</strong> (demanda, pruebas/anexos, etc.). Abajo.
+              </p>
+              <div className="rounded-md border border-dashed border-gray-300 bg-white px-3 py-2 text-sm text-gray-800">
+                <span className="font-medium text-gray-900">Ejemplo incluido (referencia de trámite No 202600358 — no son los 23 dígitos del radicado):</span>{' '}
+                <a
+                  href="/ejemplos/RV_Generacion_Tutela_en_linea_No_202600358.eml"
+                  download="RV_Generacion_Tutela_en_linea_No_202600358.eml"
+                  className="text-cyan-700 underline font-medium hover:text-cyan-900"
+                >
+                  Descargar .eml de prueba
+                </a>
+                <span className="text-gray-500"> — Mismo archivo en el repo: </span>
+                <code className="text-xs bg-gray-100 px-1 rounded">uploads/ejemplos/</code>
+                <span className="text-gray-500"> y </span>
+                <code className="text-xs bg-gray-100 px-1 rounded">public/ejemplos/</code>
+              </div>
+              <form onSubmit={handleDescargarPaqueteEml} className="rounded-lg border border-cyan-200 bg-cyan-50/40 p-3 space-y-2">
+                <Label className="text-cyan-900">Archivo único .eml (Outlook)</Label>
+                <Input type="file" name="emlPaquete" accept=".eml" disabled={descargandoPaqueteEml} />
+                <Button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-700" disabled={descargandoPaqueteEml}>
+                  {descargandoPaqueteEml ? 'Generando ZIP…' : 'Descargar paquete ZIP (PDF correo + secuencia)'}
+                </Button>
+                <p className="text-xs text-gray-600">
+                  Incluye: constancia PDF del mensaje (protocolo), <code className="text-[11px]">00_INDICE_SECUENCIA.txt</code>, y orden sugerido: correo → acta SEC → demanda → PruebasAnexos → poder (si aplica). Si el correo trae un ZIP adjunto (tutela en línea), se descomprime y entra al orden.
+                </p>
+              </form>
+              <p className="text-sm text-gray-600 pt-2 border-t border-gray-200">
+                <strong>Opción B — Varios archivos:</strong> suba .eml, ZIP y PDF juntos solo para ver la tabla de orden (sin descargar paquete).
+              </p>
+              <form onSubmit={handlePrepararOrdenDocumentos} className="space-y-3">
+                <div className="space-y-2">
+                  <Label>Archivos (varios)</Label>
+                  <Input type="file" name="archivos" multiple accept=".zip,.pdf,.eml,application/pdf,message/rfc822" disabled={preparandoOrdenDoc} />
+                  <p className="text-xs text-gray-500">Outlook: correo de reparto guardado como .eml; más el .zip descargado del trámite en línea; opcional acta suelta.</p>
+                </div>
+                <Button type="submit" variant="outline" className="w-full border-cyan-500 text-cyan-700 hover:bg-cyan-50" disabled={preparandoOrdenDoc}>
+                  {preparandoOrdenDoc ? 'Generando orden…' : 'Generar orden sugerida'}
+                </Button>
+              </form>
+              {resultadoPrepararOrden && (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3 text-sm">
+                  {resultadoPrepararOrden.descripcionOrden && (
+                    <p className="text-xs text-gray-600">{resultadoPrepararOrden.descripcionOrden}</p>
+                  )}
+                  {resultadoPrepararOrden.instruccionesOutlook && (
+                    <p className="text-xs text-cyan-800 bg-cyan-50 border border-cyan-100 rounded px-2 py-1.5">{resultadoPrepararOrden.instruccionesOutlook}</p>
+                  )}
+                  {resultadoPrepararOrden.advertencias.length > 0 && (
+                    <ul className="list-disc pl-4 text-amber-900 text-xs space-y-1 bg-amber-50 border border-amber-200 rounded p-2">
+                      {resultadoPrepararOrden.advertencias.map((a, i) => (
+                        <li key={i}>{a}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="overflow-x-auto max-h-56 border border-gray-200 rounded bg-white">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b bg-gray-100 text-left">
+                          <th className="p-2 w-8">#</th>
+                          <th className="p-2">Rol</th>
+                          <th className="p-2 min-w-[140px]">Nombre</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {resultadoPrepararOrden.orden.map((row) => (
+                          <tr key={`${row.orden}-${row.nombre}`} className="border-b border-gray-100">
+                            <td className="p-2 tabular-nums">{row.orden}</td>
+                            <td className="p-2 text-gray-700">{row.etiqueta || row.rol}</td>
+                            <td className="p-2 font-mono text-[11px] break-all">{row.nombre}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              <DialogFooter className="sm:justify-start">
+                <Button type="button" variant="ghost" size="sm" className="text-gray-600" onClick={() => setShowCrearExpediente(false)}>Cerrar</Button>
+              </DialogFooter>
             </TabsContent>
             <TabsContent value="manual" className="mt-4">
               <form onSubmit={(e) => { e.preventDefault(); setShowCrearExpediente(false); setShowNuevoProceso(true); setNuevoProcesoTipo('general'); }} className="space-y-4">
