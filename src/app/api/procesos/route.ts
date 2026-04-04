@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { EstadoProceso, CategoriaProceso, ClaseProceso } from '@prisma/client'
 import { getUserFromHeader, juzgadoWhere } from '@/lib/auth-utils'
 import { generarRadicado } from '@/lib/radicado'
+import { generarInformeIngresoDespacho } from '@/lib/plantillas/generar-informe-ingreso-despacho'
 
 // GET - Listar todos los procesos
 export async function GET(request: NextRequest) {
@@ -180,6 +181,22 @@ export async function POST(request: NextRequest) {
         })
       }
     })
+
+    if (user?.id) {
+      try {
+        const inf = await generarInformeIngresoDespacho({
+          procesoId: proceso.id,
+          subidoPorId: user.id,
+          regenerar: false,
+          origenProceso: 'Radicación JudicialSys',
+        })
+        if (!inf.ok && inf.codigo !== 'VALIDACION') {
+          console.warn('[informe ingreso]', inf.mensaje)
+        }
+      } catch (e) {
+        console.warn('[informe ingreso] excepción', e)
+      }
+    }
 
     return NextResponse.json({
       success: true,

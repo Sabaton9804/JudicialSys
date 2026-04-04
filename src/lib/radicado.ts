@@ -49,3 +49,21 @@ export function generarRadicado(
   const instStr = instancia === 1 ? '00' : '01'
   return `${despacho}${anioStr}${consecStr}${instStr}`
 }
+
+/** Año de radicación (dígitos 13–16 del CUI de 23 dígitos). */
+export function anioRadicacionEnCui(radicado23: string): number | null {
+  const d = radicado23.replace(/\D/g, '')
+  if (d.length !== RADICADO_LENGTH || !/^\d+$/.test(d)) return null
+  return parseInt(d.slice(12, 16), 10)
+}
+
+/**
+ * Al importar correo/ZIP/PDF, solo se acepta un CUI cuyo año esté cerca del año actual.
+ * Evita falsos positivos (p. ej. ventana sobre todos los dígitos del PDF que alinea 2017 por cédulas/fechas).
+ */
+export function esAnioRadicacionPlausibleImportacionNueva(
+  anio: number,
+  anioReferencia: number = new Date().getFullYear()
+): boolean {
+  return anio >= anioReferencia - 2 && anio <= anioReferencia + 1
+}

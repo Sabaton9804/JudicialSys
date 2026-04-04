@@ -10,14 +10,26 @@ import { consolidarZipTutelaEnLinea, type InnerZipEntry } from '@/lib/eml-tutela
 
 const EXT_TXT = ['.pdf', '.doc', '.docx', '.txt']
 
-/** Solo dominios de la Rama / entorno judicial (evita SSRF a redes internas). */
+/**
+ * Dominios desde los que se permite descargar ZIP/PDF del enlace «Archivo» en correos de tutela.
+ * La Rama suele usar *.ramajudicial.gov.co; el trámite «tutela en línea» a veces enlaza a
+ * portales de entidad (p. ej. Secretaría de Hacienda Bogotá) — antes se omitían y el usuario sí
+ * descargaba en el navegador.
+ */
+const HOSTS_DESCARGA_JUDICIAL_EXTRA = new Set([
+  'haciendabogota.gov.co',
+  'www.haciendabogota.gov.co',
+])
+
+/** Solo HTTPS y lista acotada (evita SSRF a redes internas). */
 export function urlPermitidaDescargaJudicial(urlStr: string): boolean {
   try {
     const u = new URL(urlStr)
     if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
     const h = u.hostname.toLowerCase()
     if (h.startsWith('ejemplo.') || h.includes('.ejemplo.')) return false
-    return h === 'ramajudicial.gov.co' || h.endsWith('.ramajudicial.gov.co')
+    if (h === 'ramajudicial.gov.co' || h.endsWith('.ramajudicial.gov.co')) return true
+    return HOSTS_DESCARGA_JUDICIAL_EXTRA.has(h)
   } catch {
     return false
   }
@@ -37,11 +49,15 @@ export function expandirUrlSiSafelinks(urlStr: string): string {
   return urlStr
 }
 
+/** Base para resolver href relativos: prioriza Rama; si el correo solo enlaza a Hacienda Bogotá, úsese esa. */
 function inferirBaseRama(html: string): string {
   const m =
     /https?:\/\/([a-z0-9.-]+\.ramajudicial\.gov\.co)/i.exec(html) ||
     /https%3A%2F%2F([a-z0-9.-]+\.ramajudicial\.gov\.co)/i.exec(html)
   if (m?.[1]) return `https://${m[1]}`
+  if (/https?:\/\/(www\.)?haciendabogota\.gov\.co/i.test(html)) {
+    return 'https://www.haciendabogota.gov.co'
+  }
   return 'https://www.ramajudicial.gov.co'
 }
 
@@ -129,8 +145,11 @@ export async function descargarArchivosDesdeEnlacesHtml(
       let referer = 'https://www.ramajudicial.gov.co/'
       try {
         const u0 = new URL(url)
-        if (u0.hostname.endsWith('.ramajudicial.gov.co') || u0.hostname === 'ramajudicial.gov.co') {
+        const h0 = u0.hostname.toLowerCase()
+        if (h0.endsWith('.ramajudicial.gov.co') || h0 === 'ramajudicial.gov.co') {
           referer = `${u0.protocol}//${u0.hostname}/`
+        } else if (h0 === 'haciendabogota.gov.co' || h0 === 'www.haciendabogota.gov.co') {
+          referer = 'https://www.haciendabogota.gov.co/'
         }
       } catch {
         /* vacío */

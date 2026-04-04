@@ -1,6 +1,10 @@
 import { db } from '@/lib/db'
 import { uploadFile } from '@/lib/storage'
-import { generarRadicado } from '@/lib/radicado'
+import {
+  generarRadicado,
+  anioRadicacionEnCui,
+  esAnioRadicacionPlausibleImportacionNueva,
+} from '@/lib/radicado'
 import { parsearTextoDocumentos, type DatosExtraidos } from '@/lib/parse-reparto'
 import {
   extraerTextoDemandaDesdeTextosImportacion,
@@ -162,6 +166,9 @@ export async function crearProcesoDesdeImportacion(params: {
 
   const obsIa = [
     datos.tipoProcesoDescripcion ? `Tipo (IA): ${datos.tipoProcesoDescripcion}` : '',
+    datos.claseProcesoGrupoCGP ? `Clase CGP (IA): ${datos.claseProcesoGrupoCGP}` : '',
+    datos.apoderadosDemandante ? `Apod. demandante (IA): ${datos.apoderadosDemandante.slice(0, 220)}` : '',
+    datos.apoderadosDemandado ? `Apod. demandado (IA): ${datos.apoderadosDemandado.slice(0, 220)}` : '',
     datos.pretensiones ? `Pretensiones: ${datos.pretensiones}` : '',
     datos.derechosVulnerados ? `Derechos invocados: ${datos.derechosVulnerados}` : '',
     datos.observacionesExtraccion ? datos.observacionesExtraccion : '',
@@ -181,7 +188,18 @@ export async function crearProcesoDesdeImportacion(params: {
   if (radicadoPreferido) {
     const limpio = radicadoPreferido.replace(/\D/g, '')
     if (limpio.length === 23 && limpio.startsWith(codigo12)) {
-      radicadoObjetivo = limpio
+      const yaExiste = await db.proceso.findFirst({
+        where: { juzgadoId, radicado: limpio },
+        select: { id: true },
+      })
+      if (yaExiste) {
+        radicadoObjetivo = limpio
+      } else {
+        const anioCui = anioRadicacionEnCui(limpio)
+        if (anioCui !== null && esAnioRadicacionPlausibleImportacionNueva(anioCui)) {
+          radicadoObjetivo = limpio
+        }
+      }
     }
   }
 

@@ -57,8 +57,9 @@ async function listarHandler(
     return NextResponse.json(
       {
         success: false,
+        motivo: 'expediente_no_en_sgde',
         error:
-          'No se encontró el expediente en SGDE o no hay acceso con estas credenciales.',
+          'En el SGDE aún no hay carpeta para este radicado, o su usuario no tiene acceso. Si el expediente no lo ha creado en el gestor de la Rama, es normal: créelo primero y vuelva a consultar.',
       },
       { status: 422 }
     )

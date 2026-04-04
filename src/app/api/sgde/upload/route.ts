@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getUserFromHeader, juzgadoWhere } from '@/lib/auth-utils'
 import {
+  contarPaginasPdfSgde,
+  getMaxPaginaFinDoc,
   login,
   normalizarRadicadoSgde,
-  resolverUuidCarpeta,
+  resolverUuidCarpetaPriorizandoExpedienteAlmacenado,
   resolveSgdeCredentials,
   subirArchivoSgde,
 } from '@/lib/sgde/client'
+import { leerSgdeExpedienteAlmacenado } from '@/lib/sgde/persist-proceso-sgde-db'
 
 export const runtime = 'nodejs'
 
@@ -24,7 +27,7 @@ const MIME_OK = new Set([
  *
  * FormData: file, procesoId, tipoDocumental (ej. Auto, Sentencia),
  * opcional: sgdeUsuario, sgdePassword,
- * opcional: nivelAcceso (Reservado | Público | Confidencial), rutaDestino (ej. 01PrimeraInstancia/C01),
+ * opcional: nivelAcceso (Reservado | Público | Confidencial),
  * opcional: nombreArchivoSgde (nombre visible en SGDE; si no, se deriva del tipo + extensión).
  */
 export async function POST(request: NextRequest) {
@@ -53,7 +56,6 @@ export async function POST(request: NextRequest) {
     let nivelAcceso = (formData.get('nivelAcceso') as string | null)?.trim() || 'Reservado'
     if (nivelAcceso === 'Publico') nivelAcceso = 'Público'
     if (!NIVELES.has(nivelAcceso)) nivelAcceso = 'Reservado'
-    const rutaDestino = ((formData.get('rutaDestino') as string | null) || '01PrimeraInstancia/C01').trim()
     const nombreArchivoSgdeRaw = (formData.get('nombreArchivoSgde') as string | null)?.trim()
 
     if (!file || !procesoId) {
@@ -102,19 +104,29 @@ export async function POST(request: NextRequest) {
       `${tipoDocumental.replace(/\s+/g, '')}${ext === '.pdf' ? '.pdf' : '.docx'}`
 
     const buffer = Buffer.from(await file.arrayBuffer())
+    let paginasDoc = 1
+    if (ext === '.pdf') paginasDoc = await contarPaginasPdfSgde(buffer)
 
     const { token, alfTicket } = await login(cred.usuario, cred.password)
-    let nodeUuid = await resolverUuidCarpeta(alfTicket, radicadoNorm, rutaDestino)
+    const sgdeExpedienteId = (await leerSgdeExpedienteAlmacenado(procesoId)).alfrescoId
+    const nodeUuid = await resolverUuidCarpetaPriorizandoExpedienteAlmacenado(
+      alfTicket,
+      radicadoNorm,
+      sgdeExpedienteId
+    )
     if (!nodeUuid) {
       return NextResponse.json(
         {
           success: false,
           error:
-            'No se encontró el expediente en SGDE o no hay acceso. Verifique el radicado y las credenciales.',
+            'En el SGDE aún no existe expediente con este radicado o no hay acceso. Cree el expediente desde JudicialSys y reintente.',
         },
         { status: 422 }
       )
     }
+
+    const inicioIdx = (await getMaxPaginaFinDoc(alfTicket, nodeUuid)) + 1
+    const paginaFinDoc = inicioIdx + paginasDoc - 1
 
     const result = await subirArchivoSgde({
       token,
@@ -124,8 +136,11 @@ export async function POST(request: NextRequest) {
       nodeUuid,
       tipoDocumental,
       nivelAcceso,
+      nomExpedienteCui: radicadoNorm,
       mimeType: file.type,
       extension: ext,
+      paginaInicioDoc: inicioIdx,
+      paginaFinDoc,
     })
 
     if (!result.ok) {

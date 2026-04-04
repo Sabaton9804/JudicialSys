@@ -6,7 +6,11 @@
  * se usa `parsearDemandaConIA` con un prompt específico; si no, se analiza el conjunto de textos con `parsearConIA`.
  */
 import OpenAI from 'openai'
+import { getContextoNormativoParaDemanda } from '@/lib/normativa/contexto-ia-cgp-tutelas'
+import { textoCatalogoSgdeParaPrompt } from '@/lib/sgde/catalogo-sgde-serie-subserie'
 import type { DatosExtraidos } from './parse-reparto'
+
+const SEP_NORMATIVA_TAREA = '\n\n---\n\n'
 
 /** Coincide con enum ClaseProceso en Prisma (subconjunto habitual en escritos). */
 const CLASES_PROCESO_VALIDAS = new Set([
@@ -60,25 +64,54 @@ Extrae y devuelve ÚNICAMENTE un JSON válido con estas claves (usa null si no e
 
 Responde SOLO con el JSON, sin explicaciones ni markdown.`
 
-const SYSTEM_PROMPT_DEMANDA = `Eres un asistente jurídico especializado en lectura de escritos de demanda y tutelas colombianas (Rama Judicial).
+/** Instrucciones de identificación procesal (CGP) — salida texto + JSON auxiliar para el sistema. */
+const SYSTEM_PROMPT_DEMANDA = `Actúa como un abogado experto en derecho procesal civil colombiano, con dominio del Código General del Proceso.
 
-Analiza ÚNICAMENTE el texto del escrito de demanda que envía el usuario. Devuelve SOLO un JSON válido (sin markdown) con estas claves; usa null si no aparece información clara:
-{
-  "demandante": "nombre completo o razón social del demandante, accionante o peticionario",
-  "demandado": "nombre completo o razón social del demandado, accionado o entidad demandada",
-  "demanda": "síntesis del objeto del proceso en máximo 280 caracteres",
-  "radicado": "solo dígitos del número de radicado de 23 dígitos si consta",
-  "cuantia": número en pesos colombianos (solo número) o null si no hay cuantía o no aplica (p. ej. tutela)",
-  "claseProceso": "uno de: EJECUTIVO_SINGULAR, EJECUTIVO_HIPOTECARIO, EJECUTIVO_PRENDARIO, ORDINARIO, VERBAL, VERBAL_SUMARIO, TUTELA, HABEAS_CORPUS, HABEAS_DATA, ACCION_POPULAR, ACCION_DE_GRUPO, ACCION_DE_CUMPLIMIENTO, ACCION_DE_TUTELA_CONTRA_PROVIDENCIA, POSESORIO, LIQUIDACION, DIVISORIO — el que mejor encaje según el escrito",
-  "tipoProcesoDescripcion": "tipo o subtipo en lenguaje natural (ej. tutela de salud, ejecución de títulos, verbal civil por sumas de dinero)",
-  "derechosVulnerados": "si es tutela u acción constitucional, derechos invocados (breve lista); si no aplica, null",
-  "pretensiones": "qué pide el actor en el petitorio (breve)",
-  "documentoDemandante": "cédula o NIT del demandante si consta",
-  "documentoDemandado": "NIT, cédula o identificación del demandado si consta",
-  "observacionesExtraccion": "cualquier dato útil adicional en una sola frase (ej. cuantía indeterminada, múltiples demandados); null si nada relevante"
-}
+Tu función es leer una demanda judicial y extraer únicamente la información básica de identificación del proceso, sin realizar análisis jurídico ni desarrollar contenido.
 
-Reglas: no inventes datos; si hay varios demandados, resume el principal en "demandado" y menciona el resto en observacionesExtraccion. Responde SOLO con el JSON.`
+REGLAS ESTRICTAS
+- NO resumas hechos, pretensiones o pruebas.
+- NO hagas interpretaciones jurídicas complejas.
+- Para partes, documentos y datos fácticos: SOLO extrae lo literal o claramente identificable en el escrito.
+- Si un dato literal no aparece, escribe exactamente: "No se identifica en el documento".
+- NO inventes nombres, números ni hechos que no estén en el escrito.
+- Usa lenguaje técnico, claro y conciso.
+- EXCEPCIÓN (campos sgde* en el JSON): el escrito de demanda casi NUNCA trae las etiquetas "Serie", "Subserie" ni el vocabulario exacto del catálogo SGDE. Para esos campos debes INFERIR y SUGERIR valores razonables según el tipo de proceso que se desprende del escrito (p. ej. acción de tutela → Constitucional y subserie exacta del catálogo SGDE "Acciones Constitucionales de Tutela", no solo la palabra "Tutela"; proceso ejecutivo → Civil / Ejecutivo). No copies texto que diga "Serie:" porque normalmente no existirá: clasifica tú.
+
+TAREAS
+1) TIPO DE PROCESO — Identificar el tipo (ej.: ejecutivo, verbal, pertenencia, monitorio, ordinario, tutela, etc.). Solo inferir si es evidente en el texto.
+2) CLASE DE PROCESO — Clasificar en UNA de estas categorías: Declarativo, Ejecutivo, Liquidatorio, Especial (si no es claro: "No se identifica en el documento").
+3) PARTES PROCESALES — Demandante(s) y demandado(s): nombre completo o razón social; tipo de persona (natural o jurídica); identificación si aparece; calidad procesal solo si está expresamente indicada.
+4) APODERADOS — Apoderado(s) del demandante y del demandado. Si no aparecen, indicarlo con la frase de no identificación.
+5) CLASIFICACIÓN SUGERIDA PARA SGDE (solo en el JSON, campos sgde*) — A partir del análisis del escrito, sugerir Serie, Subserie y categoría como las usaría un usuario al crear el expediente en el gestor documental, aunque el escrito no use esas palabras.
+
+FORMATO DE RESPUESTA OBLIGATORIO (primero escribe exactamente este esquema numerado, en español):
+
+1. Tipo de proceso:
+2. Clase de proceso:
+
+3. Demandante(s):
+
+4. Demandado(s):
+
+5. Apoderados:
+
+Después del punto 5, deja UNA línea en blanco y luego exactamente esta línea separadora:
+---METADATOS_JSON---
+En la línea siguiente, UN solo objeto JSON minificado (sin markdown, sin texto antes ni después) con estas claves para integración interna. En demandante, demandado, documentos y apoderados use valores del documento o "No se identifica en el documento". En los campos sgde* use la clasificación inferida (ver abajo), no exija literalidad.
+{"demandante":"","demandado":"","tipoProceso":"","claseProcesoGrupo":"","tipoPersonaDemandante":"","tipoPersonaDemandado":"","documentoDemandante":"","documentoDemandado":"","apoderadosDemandante":"","apoderadosDemandado":"","claseProceso":"","sgdeSerie":"","sgdeSubserie":"","sgdeNombreExpediente":"","sgdeCodigoSubserie":"","sgdeCategoriaProceso":""}
+
+En "claseProceso" usa cuando sea posible un valor del sistema: ORDINARIO, VERBAL, TUTELA, EJECUTIVO_SINGULAR, EJECUTIVO_HIPOTECARIO, EJECUTIVO_PRENDARIO, VERBAL_SUMARIO, u otro coherente con el escrito; si no aplica, "No se identifica en el documento".
+
+CAMPOS SGDE (inferidos — el escrito no los trae como tal; tú sugieres según el tipo de proceso):
+- "sgdeCategoriaProceso": "CIVIL" o "CONSTITUCIONAL" según la naturaleza de la acción (tutela, hábeas, etc. → CONSTITUCIONAL; resto típico del proceso civil → CIVIL).
+- "sgdeSerie": use EXACTAMENTE el texto de la columna «Serie» en la tabla siguiente (Civil o Constitucional), coherente con sgdeCategoriaProceso y con "claseProceso".
+- "sgdeSubserie": use EXACTAMENTE el texto de la columna «Subserie» de la fila que corresponda a "claseProceso" en la tabla (mismo texto que el gestor SGDE). No abrevie (p. ej. tutela → "Acciones Constitucionales de Tutela").
+- "sgdeNombreExpediente": arma una denominación breve para listados (idealmente partes "X vs Y" si constan); si faltan partes claras, una referencia corta al tipo de proceso. NO es el CUI.
+- "sgdeCodigoSubserie": solo si en el escrito aparece un código o referencia documental explícita de subserie; si no, "No se identifica en el documento" (es lo normal).
+
+TABLA INTERNA — Serie y Subserie SGDE por clase de proceso (JudicialSys / Prisma). Copie el par que corresponda a la clase inferida:
+${textoCatalogoSgdeParaPrompt()}`
 
 function limpiarDocumentoIdentidad(s: string): string | undefined {
   const t = s.replace(/[^\d]/g, '')
@@ -93,6 +126,46 @@ function jsonDesdeRespuestaIA(content: string): Record<string, unknown> | null {
   } catch {
     return null
   }
+}
+
+/** Extrae un objeto JSON aunque venga rodeado de espacios o texto suelto. */
+function extraerJsonObjeto(s: string): Record<string, unknown> | null {
+  const t = s.trim()
+  const directo = jsonDesdeRespuestaIA(t)
+  if (directo) return directo
+  const i = t.indexOf('{')
+  const j = t.lastIndexOf('}')
+  if (i >= 0 && j > i) {
+    try {
+      return JSON.parse(t.slice(i, j + 1)) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+const SEPARADOR_METADATOS_DEMANDA = '---METADATOS_JSON---'
+
+function parsearRespuestaDemandaIA(content: string): DatosExtraidos | null {
+  const datos: DatosExtraidos = {}
+  const idx = content.indexOf(SEPARADOR_METADATOS_DEMANDA)
+  if (idx >= 0) {
+    const informe = content.slice(0, idx).trim()
+    if (informe) datos.informeDemandaProcesal = informe.slice(0, 14000)
+    const jsonPart = content.slice(idx + SEPARADOR_METADATOS_DEMANDA.length).trim()
+    const parsed = extraerJsonObjeto(jsonPart)
+    if (parsed) Object.assign(datos, mapearParsedADatos(parsed))
+  } else {
+    const parsed = extraerJsonObjeto(content)
+    if (parsed && Object.keys(parsed).length > 0) {
+      Object.assign(datos, mapearParsedADatos(parsed))
+    } else {
+      const t = content.trim()
+      if (t.length >= 20) datos.informeDemandaProcesal = t.slice(0, 14000)
+    }
+  }
+  return Object.keys(datos).length ? datos : null
 }
 
 function mapearParsedADatos(parsed: Record<string, unknown>): DatosExtraidos {
@@ -113,6 +186,18 @@ function mapearParsedADatos(parsed: Record<string, unknown>): DatosExtraidos {
 
   if (parsed.tipoProcesoDescripcion && typeof parsed.tipoProcesoDescripcion === 'string')
     datos.tipoProcesoDescripcion = parsed.tipoProcesoDescripcion.slice(0, 400)
+  else if (parsed.tipoProceso && typeof parsed.tipoProceso === 'string')
+    datos.tipoProcesoDescripcion = parsed.tipoProceso.slice(0, 400)
+  if (parsed.claseProcesoGrupo && typeof parsed.claseProcesoGrupo === 'string')
+    datos.claseProcesoGrupoCGP = parsed.claseProcesoGrupo.slice(0, 120)
+  if (parsed.apoderadosDemandante && typeof parsed.apoderadosDemandante === 'string')
+    datos.apoderadosDemandante = parsed.apoderadosDemandante.slice(0, 2000)
+  if (parsed.apoderadosDemandado && typeof parsed.apoderadosDemandado === 'string')
+    datos.apoderadosDemandado = parsed.apoderadosDemandado.slice(0, 2000)
+  if (parsed.tipoPersonaDemandante && typeof parsed.tipoPersonaDemandante === 'string')
+    datos.tipoPersonaDemandante = parsed.tipoPersonaDemandante.slice(0, 200)
+  if (parsed.tipoPersonaDemandado && typeof parsed.tipoPersonaDemandado === 'string')
+    datos.tipoPersonaDemandado = parsed.tipoPersonaDemandado.slice(0, 200)
   if (parsed.derechosVulnerados && typeof parsed.derechosVulnerados === 'string')
     datos.derechosVulnerados = parsed.derechosVulnerados.slice(0, 600)
   if (parsed.pretensiones && typeof parsed.pretensiones === 'string')
@@ -127,6 +212,21 @@ function mapearParsedADatos(parsed: Record<string, unknown>): DatosExtraidos {
   }
   if (parsed.observacionesExtraccion && typeof parsed.observacionesExtraccion === 'string')
     datos.observacionesExtraccion = parsed.observacionesExtraccion.slice(0, 800)
+
+  if (parsed.sgdeSerie && typeof parsed.sgdeSerie === 'string')
+    datos.sgdeSerie = parsed.sgdeSerie.slice(0, 120)
+  if (parsed.sgdeSubserie && typeof parsed.sgdeSubserie === 'string')
+    datos.sgdeSubserie = parsed.sgdeSubserie.slice(0, 120)
+  if (parsed.sgdeNombreExpediente && typeof parsed.sgdeNombreExpediente === 'string')
+    datos.sgdeNombreExpediente = parsed.sgdeNombreExpediente.slice(0, 300)
+  if (parsed.sgdeCodigoSubserie && typeof parsed.sgdeCodigoSubserie === 'string')
+    datos.sgdeCodigoSubserie = parsed.sgdeCodigoSubserie.slice(0, 120)
+  if (parsed.sgdeCategoriaProceso && typeof parsed.sgdeCategoriaProceso === 'string') {
+    const u = parsed.sgdeCategoriaProceso.trim().toUpperCase()
+    if (u === 'CIVIL' || u === 'CONSTITUCIONAL') datos.sgdeCategoriaProceso = u
+    else if (/CONSTITUC/.test(u)) datos.sgdeCategoriaProceso = 'CONSTITUCIONAL'
+    else if (u.includes('CIVIL')) datos.sgdeCategoriaProceso = 'CIVIL'
+  }
 
   return datos
 }
@@ -158,17 +258,17 @@ export async function parsearDemandaConIA(textoDemanda: string): Promise<DatosEx
     const completion = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL_DEMANDA?.trim() || 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT_DEMANDA },
+        {
+          role: 'system',
+          content: getContextoNormativoParaDemanda() + SEP_NORMATIVA_TAREA + SYSTEM_PROMPT_DEMANDA,
+        },
         { role: 'user', content: `Texto del escrito de demanda:\n\n${t.slice(0, 16000)}` },
       ],
       temperature: 0.15,
     })
     const content = completion.choices[0]?.message?.content?.trim()
     if (!content) return null
-    const parsed = jsonDesdeRespuestaIA(content)
-    if (!parsed) return null
-    const datos = mapearParsedADatos(parsed)
-    return Object.keys(datos).length ? datos : null
+    return parsearRespuestaDemandaIA(content)
   } catch (e) {
     console.error('Error parsearDemandaConIA:', e)
     return null
@@ -184,7 +284,10 @@ export async function parsearConIA(texto: string): Promise<DatosExtraidos | null
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        {
+          role: 'system',
+          content: getContextoNormativoParaDemanda() + SEP_NORMATIVA_TAREA + SYSTEM_PROMPT,
+        },
         { role: 'user', content: `Extrae los datos de este documento judicial:\n\n${texto.slice(0, 12000)}` },
       ],
       temperature: 0.1,

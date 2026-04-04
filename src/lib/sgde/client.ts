@@ -127,6 +127,30 @@ export async function getSiguienteOrden(alfTicket: string, nodeUuid: string): Pr
   return maxId + 1
 }
 
+/**
+ * Mayor `rama:paginaFinDoc` entre documentos hijos de la carpeta (índice acumulado del expediente).
+ * Si no hay datos, devuelve 0 para que el siguiente documento empiece en página 1.
+ */
+export async function getMaxPaginaFinDoc(alfTicket: string, nodeUuid: string): Promise<number> {
+  if (!alfTicket) return 0
+  const url = `${NODES_URL}/${nodeUuid}/children?maxItems=1000&include=properties`
+  const h = { ...HEADERS, Authorization: basicAuthAlfresco(alfTicket) }
+  const r = await fetch(url, { headers: h })
+  if (!r.ok) return 0
+  const data = (await r.json()) as {
+    list?: { entries?: Array<{ entry?: { properties?: Record<string, unknown> } }> }
+  }
+  const entries = data.list?.entries ?? []
+  let maxFin = 0
+  for (const e of entries) {
+    const raw = e.entry?.properties?.['rama:paginaFinDoc']
+    if (raw == null) continue
+    const n = typeof raw === 'number' ? raw : parseInt(String(raw), 10)
+    if (!Number.isNaN(n) && n > maxFin) maxFin = n
+  }
+  return maxFin
+}
+
 type AlfEntry = { entry?: { isFolder?: boolean; name?: string; id?: string } }
 
 /** Documento hijo directo de una carpeta del expediente (p. ej. Cuaderno principal). */
@@ -141,8 +165,8 @@ export type SgdeDocumentoListItem = {
   fechaPublicacion: string
 }
 
-/** UUID del nodo expediente en Alfresco (búsqueda por radicado). */
-async function buscarNodoExpedienteId(
+/** UUID del nodo expediente en Alfresco (búsqueda por radicado / nombre CUI). */
+export async function buscarNodoExpedienteId(
   alfTicket: string,
   expedienteNumero: string
 ): Promise<string | null> {
@@ -162,6 +186,394 @@ async function buscarNodoExpedienteId(
   return data.list?.entries?.[0]?.entry?.id ?? null
 }
 
+export type LeerNodoExpedienteResult =
+  | {
+      ok: true
+      nodeId: string
+      cmName: string
+      nomExpediente: string
+      nodeType?: string
+      /** Solo si se pidió `incluirPropiedadesRama`: metadatos rama:* para diagnóstico (p. ej. estado en portal). */
+      propiedadesRama?: Record<string, string>
+    }
+  | { ok: false; status: number; detalle?: string }
+
+function resumirPropiedadesRamaParaDiagnostico(props: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(props)) {
+    if (!k.startsWith('rama:')) continue
+    const s = v == null ? '' : typeof v === 'string' ? v : String(v)
+    out[k] = s.length > 160 ? `${s.slice(0, 160)}…` : s
+  }
+  return out
+}
+
+/**
+ * Actualiza propiedades del nodo (Alfresco REST v1). Útil si el instructivo SGDE indica el nombre del metadato de estado.
+ */
+export async function actualizarPropiedadesNodoAlfresco(
+  alfTicket: string,
+  nodeId: string,
+  properties: Record<string, string>
+): Promise<{ ok: true } | { ok: false; error: string; status?: number }> {
+  if (!alfTicket || !nodeId?.trim() || !Object.keys(properties).length) {
+    return { ok: false, error: 'Faltan ticket, nodo o propiedades' }
+  }
+  const h = { ...HEADERS, Authorization: basicAuthAlfresco(alfTicket) }
+  const url = `${NODES_URL}/${encodeURIComponent(nodeId.trim())}`
+  const r = await fetch(url, { method: 'PUT', headers: h, body: JSON.stringify({ properties }) })
+  if (r.status === 200) return { ok: true }
+  const t = await r.text().catch(() => '')
+  return { ok: false, error: t.slice(0, 500), status: r.status }
+}
+
+/**
+ * Tras crear el expediente por API, opcionalmente escribe el metadato de «estado» si el entorno lo define.
+ * El portal web suele rellenar columnas como «En trámite» con un flujo distinto; el nombre exacto del campo
+ * depende del modelo CSJ: configurar SGDE_EXPEDIENTE_ESTADO_PROP y SGDE_EXPEDIENTE_ESTADO_VALOR según instructivo UTDI.
+ */
+export async function aplicarMetadatosExpedienteOpcionalesDesdeEnv(
+  alfTicket: string,
+  nodeId: string
+): Promise<{ aplicado: boolean; detalle?: string }> {
+  const prop = process.env.SGDE_EXPEDIENTE_ESTADO_PROP?.trim()
+  const valor = process.env.SGDE_EXPEDIENTE_ESTADO_VALOR?.trim()
+  if (!prop || !valor) return { aplicado: false }
+  const r = await actualizarPropiedadesNodoAlfresco(alfTicket, nodeId, { [prop]: valor })
+  if (r.ok) return { aplicado: true }
+  return { aplicado: false, detalle: r.error }
+}
+
+/**
+ * Lee un nodo por UUID (Alfresco) con el ticket del SGDE. Sirve para comprobar si el UUID
+ * guardado en JudicialSys sigue existiendo y es accesible con las credenciales actuales.
+ */
+export async function leerNodoExpedientePorId(
+  alfTicket: string,
+  nodeUuid: string,
+  options?: { incluirPropiedadesRama?: boolean }
+): Promise<LeerNodoExpedienteResult> {
+  if (!alfTicket || !nodeUuid?.trim()) return { ok: false, status: 0 }
+  const h = { ...HEADERS, Authorization: basicAuthAlfresco(alfTicket) }
+  const url = `${NODES_URL}/${encodeURIComponent(nodeUuid.trim())}?include=properties`
+  const r = await fetch(url, { headers: h })
+  if (!r.ok) {
+    const t = await r.text().catch(() => '')
+    return { ok: false, status: r.status, detalle: t.slice(0, 300) }
+  }
+  const data = (await r.json()) as {
+    entry?: {
+      id?: string
+      name?: string
+      nodeType?: string
+      properties?: Record<string, unknown>
+    }
+  }
+  const e = data.entry
+  if (!e?.id) return { ok: false, status: 500, detalle: 'Respuesta sin nodo' }
+  const props = e.properties ?? {}
+  const base = {
+    ok: true as const,
+    nodeId: e.id,
+    cmName: e.name ?? '',
+    nomExpediente: String(props['rama:nomExpediente'] ?? ''),
+    nodeType: e.nodeType,
+  }
+  if (options?.incluirPropiedadesRama) {
+    return {
+      ...base,
+      propiedadesRama: resumirPropiedadesRamaParaDiagnostico(props),
+    }
+  }
+  return base
+}
+
+async function obtenerParentNodeId(alfTicket: string, nodeId: string): Promise<string | null> {
+  if (!alfTicket || !nodeId) return null
+  const h = { ...HEADERS, Authorization: basicAuthAlfresco(alfTicket) }
+  const url = `${NODES_URL}/${encodeURIComponent(nodeId)}?include=path`
+  const r = await fetch(url, { headers: h })
+  if (!r.ok) return null
+  const data = (await r.json()) as { entry?: { parentId?: string } }
+  return data.entry?.parentId ?? null
+}
+
+async function buscarPrimerNodoPorQuery(
+  alfTicket: string,
+  query: string
+): Promise<string | null> {
+  if (!alfTicket) return null
+  const h = { ...HEADERS, Authorization: basicAuthAlfresco(alfTicket) }
+  const searchBody = {
+    query: { query, language: 'afts' as const },
+    paging: { maxItems: 3, skipCount: 0 },
+    include: ['properties', 'path'],
+  }
+  const r = await fetch(SEARCH_URL, { method: 'POST', headers: h, body: JSON.stringify(searchBody) })
+  if (!r.ok) return null
+  const data = (await r.json()) as {
+    list?: { entries?: Array<{ entry?: { id?: string } }> }
+  }
+  return data.list?.entries?.[0]?.entry?.id ?? null
+}
+
+/**
+ * Resuelve el UUID de la carpeta del despacho donde se crean expedientes (hermanos del mismo CUI).
+ * Misma idea que subir actuaciones: se usa el código de radicación (12 dígitos) del juzgado.
+ *
+ * 1) Si ya existe algún expediente en SGDE con CUI que empiece por esos 12 dígitos, el padre es el contenedor.
+ * 2) Si no, busca una carpeta cuyo nombre sea el código de 12 dígitos o los 3 del despacho (p. ej. 051).
+ */
+export async function resolverContenedorExpedientesSgde(
+  alfTicket: string,
+  codigoRadicacion12: string | null | undefined
+): Promise<string | null> {
+  const c12 = (codigoRadicacion12 || '').replace(/\D/g, '').slice(0, 12)
+  if (!alfTicket || c12.length !== 12) return null
+
+  const pref = c12
+  const queriesExp = [
+    `TYPE:"rama:expedientes" AND @rama\\:nomExpediente:${pref}*`,
+    `TYPE:'rama:expedientes' AND cm:name:${pref}*`,
+  ]
+  for (const q of queriesExp) {
+    const expId = await buscarPrimerNodoPorQuery(alfTicket, q)
+    if (expId) {
+      const parent = await obtenerParentNodeId(alfTicket, expId)
+      if (parent) return parent
+    }
+  }
+
+  const despacho3 = c12.slice(9, 12)
+  const nombresCarpeta = [c12, despacho3]
+  for (const nombre of nombresCarpeta) {
+    const q = `TYPE:"cm:folder" AND cm:name:"${nombre}" AND -TYPE:"rama:expedientes"`
+    const folderId = await buscarPrimerNodoPorQuery(alfTicket, q)
+    if (folderId) return folderId
+  }
+
+  return null
+}
+
+export type CrearExpedienteAlfrescoParams = {
+  alfTicket: string
+  /** Carpeta padre en Alfresco (contenedor del despacho en SGDE). */
+  parentNodeUuid: string
+  /** Radicado normalizado (23 dígitos); también es el nombre del nodo y CUI en metadatos. */
+  radicado23: string
+  nombreSerie?: string
+  nombreSubserie?: string
+  nomOficinaProductora?: string
+  codigoSubserie?: string
+  /** Título legible («Nombre expediente» en el portal); el CUI sigue en name / rama:nomExpediente. */
+  nombreExpedienteTitulo?: string
+}
+
+export type CrearExpedienteAlfrescoResult =
+  | { ok: true; nodeId: string; yaExiste?: boolean }
+  | { ok: false; error: string; detalle?: string; status?: number }
+
+/**
+ * Crea un nodo tipo expediente bajo la carpeta padre del despacho (API Alfresco estándar).
+ * Requiere permisos de creación en el padre y el UUID correcto del contenedor (manual SGDE / UTDI).
+ */
+export async function crearExpedienteAlfresco(
+  p: CrearExpedienteAlfrescoParams
+): Promise<CrearExpedienteAlfrescoResult> {
+  const { alfTicket, parentNodeUuid, radicado23 } = p
+  const name = radicado23.replace(/\D/g, '').trim()
+  if (!alfTicket || !parentNodeUuid || name.length !== 23) {
+    return {
+      ok: false,
+      error:
+        name.length !== 23
+          ? 'El radicado debe tener 23 dígitos (CUI) para crear el expediente en SGDE.'
+          : 'Faltan alfTicket, carpeta padre o radicado.',
+    }
+  }
+
+  const h = { ...HEADERS, Authorization: basicAuthAlfresco(alfTicket) }
+  const s = (x: string | undefined) => (x == null || x === '' ? undefined : String(x).trim())
+  const properties: Record<string, string> = {
+    'rama:nomExpediente': name,
+  }
+  const ns = s(p.nombreSerie)
+  const nsub = s(p.nombreSubserie)
+  const nof = s(p.nomOficinaProductora)
+  const csub = s(p.codigoSubserie)
+  if (ns) properties['rama:nombreSerie'] = ns
+  if (nsub) properties['rama:nomSubserie'] = nsub
+  if (nof) properties['rama:nomOficinaProductora'] = nof
+  if (csub) properties['rama:codigoSubserie'] = csub
+  const titulo = s(p.nombreExpedienteTitulo)
+  if (titulo) properties['cm:title'] = sanitizarNombre(titulo)
+
+  const body = {
+    name,
+    nodeType: 'rama:expedientes',
+    properties,
+  }
+  const url = `${NODES_URL}/${encodeURIComponent(parentNodeUuid)}/children`
+  const r = await fetch(url, { method: 'POST', headers: h, body: JSON.stringify(body) })
+  if (r.status === 201) {
+    const data = (await r.json()) as { entry?: { id?: string } }
+    const id = data.entry?.id
+    if (id) return { ok: true, nodeId: id }
+    return { ok: false, error: 'Alfresco devolvió 201 sin id de nodo' }
+  }
+
+  const text = await r.text()
+  if (r.status === 409 || r.status === 422) {
+    const existing = await buscarNodoExpedienteId(alfTicket, name)
+    if (existing) return { ok: true, nodeId: existing, yaExiste: true }
+  }
+  return {
+    ok: false,
+    error: `No se pudo crear el expediente (HTTP ${r.status})`,
+    detalle: text.slice(0, 800),
+    status: r.status,
+  }
+}
+
+export type EliminarNodoAlfrescoResult =
+  | { ok: true }
+  | { ok: false; error: string; status?: number }
+
+/**
+ * Elimina un nodo en Alfresco (SGDE).
+ * Por defecto `permanent: false` (papelera): los usuarios normales suelen no tener permiso de borrado definitivo (403).
+ * Use `permanent: true` solo si su cuenta es administrador/propietario con derecho a eliminación permanente.
+ */
+export async function eliminarNodoAlfresco(
+  alfTicket: string,
+  nodeId: string,
+  options?: { permanent?: boolean }
+): Promise<EliminarNodoAlfrescoResult> {
+  const id = nodeId.trim()
+  if (!alfTicket || !id) return { ok: false, error: 'Faltan ticket o id de nodo' }
+  const h = { ...HEADERS, Authorization: basicAuthAlfresco(alfTicket) }
+  const permanent = options?.permanent === true
+  const url = `${NODES_URL}/${encodeURIComponent(id)}?permanent=${permanent}`
+  const r = await fetch(url, { method: 'DELETE', headers: h })
+  if (r.status === 204 || r.status === 200) return { ok: true }
+  const text = await r.text()
+  return { ok: false, error: text.slice(0, 500), status: r.status }
+}
+
+/** Elimina primero los hijos (profundidad) y luego el nodo; necesario para expedientes con carpetas/documentos. */
+async function eliminarSubarbolAlfresco(
+  alfTicket: string,
+  nodeId: string,
+  options?: { permanent?: boolean }
+): Promise<EliminarNodoAlfrescoResult> {
+  const h = { ...HEADERS, Authorization: basicAuthAlfresco(alfTicket) }
+  const listUrl = `${NODES_URL}/${encodeURIComponent(nodeId)}/children?maxItems=200`
+  const r = await fetch(listUrl, { headers: h })
+  if (r.ok) {
+    const data = (await r.json()) as {
+      list?: { entries?: Array<{ entry?: { id?: string } }> }
+    }
+    const entries = data.list?.entries ?? []
+    for (const e of entries) {
+      const cid = e.entry?.id
+      if (!cid) continue
+      const sub = await eliminarSubarbolAlfresco(alfTicket, cid, options)
+      if (!sub.ok) return sub
+    }
+  }
+  return eliminarNodoAlfresco(alfTicket, nodeId, options)
+}
+
+export type EliminarExpedientePorRadicadoResult =
+  | { ok: true; nodeId: string; radicado: string }
+  | { ok: false; error: string; status?: number }
+
+/**
+ * Busca el nodo expediente por CUI (nombre de nodo) y lo elimina con todo su contenido.
+ * Por defecto envía a la papelera (`permanent: false`). `permanent: true` solo si su usuario puede borrar definitivamente.
+ */
+export async function eliminarExpedientePorRadicadoSgde(
+  alfTicket: string,
+  radicado23: string,
+  options?: { permanent?: boolean }
+): Promise<EliminarExpedientePorRadicadoResult> {
+  const radicado = normalizarRadicadoSgde(radicado23)
+  if (radicado.length !== 23) {
+    return { ok: false, error: 'El radicado debe tener 23 dígitos (CUI).' }
+  }
+  const nodeId = await buscarNodoExpedienteId(alfTicket, radicado)
+  if (!nodeId) {
+    return {
+      ok: false,
+      error:
+        'No se encontró expediente con ese CUI en SGDE (búsqueda por nombre de nodo tipo rama:expedientes).',
+    }
+  }
+  const del = await eliminarSubarbolAlfresco(alfTicket, nodeId, options)
+  if (!del.ok) return { ok: false, error: del.error, status: del.status }
+  return { ok: true, nodeId, radicado }
+}
+
+/**
+ * «Primera instancia» bajo un nodo expediente ya conocido (sin búsqueda por CUI).
+ * Necesario cuando el índice de búsqueda aún no devuelve el expediente recién creado.
+ */
+export async function resolverUuidPrimeraInstanciaDesdeExpedienteId(
+  alfTicket: string,
+  expedienteNodeUuid: string
+): Promise<string | null> {
+  if (!alfTicket || !expedienteNodeUuid?.trim()) return null
+  const h = { ...HEADERS, Authorization: basicAuthAlfresco(alfTicket) }
+  const url = `${NODES_URL}/${encodeURIComponent(expedienteNodeUuid.trim())}/children?maxItems=50&orderBy=isFolder%20desc&include=path,properties`
+  const res = await fetch(url, { headers: h })
+  if (!res.ok) return null
+  const children = ((await res.json()) as { list?: { entries?: AlfEntry[] } }).list?.entries ?? []
+
+  let carpetaInstancia: string | undefined
+  for (const e of children) {
+    const entry = e.entry
+    if (!entry?.isFolder) continue
+    const name = (entry.name ?? '').trim()
+    if (name.toLowerCase().includes('primera')) {
+      carpetaInstancia = entry.id
+      break
+    }
+  }
+  if (!carpetaInstancia && children.length) {
+    carpetaInstancia = children[0]?.entry?.id
+  }
+  return carpetaInstancia ?? null
+}
+
+/**
+ * Carpeta destino (p. ej. Principal) bajo el expediente, sin búsqueda por CUI.
+ */
+export async function resolverUuidCarpetaDesdeExpedienteId(
+  alfTicket: string,
+  expedienteNodeUuid: string
+): Promise<string | null> {
+  const carpetaInstancia = await resolverUuidPrimeraInstanciaDesdeExpedienteId(alfTicket, expedienteNodeUuid)
+  if (!carpetaInstancia) return null
+  const h = { ...HEADERS, Authorization: basicAuthAlfresco(alfTicket) }
+  const url = `${NODES_URL}/${carpetaInstancia}/children?maxItems=50&orderBy=isFolder%20desc&include=path,properties`
+  const res = await fetch(url, { headers: h })
+  if (!res.ok) return null
+  const children = ((await res.json()) as { list?: { entries?: AlfEntry[] } }).list?.entries ?? []
+
+  for (const e of children) {
+    const entry = e.entry
+    if (!entry?.isFolder) continue
+    const name = (entry.name ?? '').trim().toLowerCase()
+    if (name.includes('principal') || name.includes('cuaderno') || name.includes('c01')) {
+      return entry.id ?? null
+    }
+  }
+  if (children.length) {
+    return children[0]?.entry?.id ?? null
+  }
+  return null
+}
+
 /**
  * UUID de la carpeta "Primera instancia" (hijo directo del expediente).
  * Misma lógica que el portal SGDE: expediente → Primera instancia → …
@@ -174,26 +586,7 @@ export async function resolverUuidPrimeraInstancia(
   if (!alfTicket) return null
   const expId = await buscarNodoExpedienteId(alfTicket, expedienteNumero)
   if (!expId) return null
-  const h = { ...HEADERS, Authorization: basicAuthAlfresco(alfTicket) }
-  const url = `${NODES_URL}/${expId}/children?maxItems=50&orderBy=isFolder%20desc&include=path,properties`
-  const res = await fetch(url, { headers: h })
-  if (!res.ok) return null
-  const children = ((await res.json()) as { list?: { entries?: AlfEntry[] } }).list?.entries ?? []
-
-  let carpetaInstancia: string | undefined
-  for (const e of children) {
-    const entry = e.entry
-    if (!entry?.isFolder) continue
-    const name = (entry.name ?? '').trim()
-    if (name.toLowerCase().includes('primera') || rutaDestino.toLowerCase().includes('c01') || !rutaDestino) {
-      carpetaInstancia = entry.id
-      if (name.toLowerCase().includes('primera')) break
-    }
-  }
-  if (!carpetaInstancia && children.length) {
-    carpetaInstancia = children[0]?.entry?.id
-  }
-  return carpetaInstancia ?? null
+  return resolverUuidPrimeraInstanciaDesdeExpedienteId(alfTicket, expId)
 }
 
 /** Subcarpetas de Primera instancia (Principal, Medidas cautelares, etc.). */
@@ -244,32 +637,16 @@ export async function listarDocumentosPorCuadernosSgde(
 
 /**
  * Resuelve radicado (solo dígitos) → UUID de la carpeta destino (p. ej. Cuaderno principal).
+ * Si el índice aún no indexa el expediente, use `resolverUuidCarpetaDesdeExpedienteId` con el UUID guardado en BD.
  */
 export async function resolverUuidCarpeta(
   alfTicket: string,
   expedienteNumero: string,
   rutaDestino = ''
 ): Promise<string | null> {
-  const carpetaInstancia = await resolverUuidPrimeraInstancia(alfTicket, expedienteNumero, rutaDestino)
-  if (!carpetaInstancia) return null
-  const h = { ...HEADERS, Authorization: basicAuthAlfresco(alfTicket) }
-  const url = `${NODES_URL}/${carpetaInstancia}/children?maxItems=50&orderBy=isFolder%20desc&include=path,properties`
-  const res = await fetch(url, { headers: h })
-  if (!res.ok) return null
-  const children = ((await res.json()) as { list?: { entries?: AlfEntry[] } }).list?.entries ?? []
-
-  for (const e of children) {
-    const entry = e.entry
-    if (!entry?.isFolder) continue
-    const name = (entry.name ?? '').trim().toLowerCase()
-    if (name.includes('principal') || name.includes('cuaderno') || name.includes('c01')) {
-      return entry.id ?? null
-    }
-  }
-  if (children.length) {
-    return children[0]?.entry?.id ?? null
-  }
-  return null
+  const expId = await buscarNodoExpedienteId(alfTicket, expedienteNumero)
+  if (!expId) return null
+  return resolverUuidCarpetaDesdeExpedienteId(alfTicket, expId)
 }
 
 function sanitizarNombre(nombre: string): string {
@@ -278,6 +655,108 @@ function sanitizarNombre(nombre: string): string {
   s = s.replace(/[/\\:*?"<>|]/g, '')
   s = s.replace(/\s+/g, ' ').trim()
   return s
+}
+
+/**
+ * Crea una carpeta cm:folder bajo un nodo padre (misma API que el botón «+ Carpeta» del SGDE).
+ * Si ya existe (409), devuelve el id encontrado entre los hijos.
+ */
+export async function crearCarpetaCmFolder(
+  alfTicket: string,
+  parentNodeUuid: string,
+  nombre: string
+): Promise<{ ok: true; nodeId: string } | { ok: false; error: string }> {
+  if (!alfTicket || !parentNodeUuid) return { ok: false, error: 'Faltan alfTicket o carpeta padre' }
+  const name = sanitizarNombre(nombre)
+  if (!name) return { ok: false, error: 'Nombre de carpeta vacío' }
+  const h = { ...HEADERS, Authorization: basicAuthAlfresco(alfTicket) }
+  const body = { name, nodeType: 'cm:folder' }
+  const url = `${NODES_URL}/${encodeURIComponent(parentNodeUuid)}/children`
+  const r = await fetch(url, { method: 'POST', headers: h, body: JSON.stringify(body) })
+  if (r.status === 201) {
+    const data = (await r.json()) as { entry?: { id?: string } }
+    const id = data.entry?.id
+    if (id) return { ok: true, nodeId: id }
+    return { ok: false, error: 'Alfresco devolvió 201 sin id de carpeta' }
+  }
+  if (r.status === 409 || r.status === 422) {
+    const subs = await listarSubcarpetasCuadernos(alfTicket, parentNodeUuid)
+    const want = name.toLowerCase()
+    for (const s of subs) {
+      if (s.nombre.toLowerCase() === want) return { ok: true, nodeId: s.id }
+    }
+  }
+  const t = await r.text()
+  return { ok: false, error: `No se pudo crear la carpeta «${name}» (HTTP ${r.status}): ${t.slice(0, 200)}` }
+}
+
+/**
+ * JudicialSys crea en SGDE la misma jerarquía que el portal: bajo el nodo expediente,
+ * carpeta «Primera instancia» (o «01PrimeraInstancia» si la primera falla) y dentro «Principal».
+ * Idempotente: si ya existen carpetas compatibles, no duplica.
+ */
+export async function asegurarEstructuraPrimeraInstanciaYPrincipal(
+  alfTicket: string,
+  expedienteNodeUuid: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!alfTicket || !expedienteNodeUuid) return { ok: false, error: 'Faltan datos' }
+
+  let primeraId = await (async () => {
+    const subs = await listarSubcarpetasCuadernos(alfTicket, expedienteNodeUuid)
+    for (const s of subs) {
+      const n = s.nombre.toLowerCase()
+      if (n.includes('primera')) return s.id
+    }
+    return null
+  })()
+
+  if (!primeraId) {
+    let c = await crearCarpetaCmFolder(alfTicket, expedienteNodeUuid, 'Primera instancia')
+    if (!c.ok) {
+      c = await crearCarpetaCmFolder(alfTicket, expedienteNodeUuid, '01PrimeraInstancia')
+    }
+    if (!c.ok) return { ok: false, error: c.error }
+    primeraId = c.nodeId
+  }
+
+  let tienePrincipal = false
+  const subsPi = await listarSubcarpetasCuadernos(alfTicket, primeraId)
+  for (const s of subsPi) {
+    const n = s.nombre.toLowerCase()
+    if (n.includes('principal') || n.includes('c01') || (n.includes('cuaderno') && n.includes('principal'))) {
+      tienePrincipal = true
+      break
+    }
+  }
+  if (!tienePrincipal) {
+    const c = await crearCarpetaCmFolder(alfTicket, primeraId, 'Principal')
+    if (!c.ok) return { ok: false, error: c.error }
+  }
+
+  return { ok: true }
+}
+
+/**
+ * Resuelve la carpeta Principal para subir documentos: prioriza el UUID del nodo expediente
+ * guardado en JudicialSys (tras «Crear en SGDE»), porque la búsqueda por CUI puede devolver vacío
+ * unos minutos hasta que indexe el expediente recién creado.
+ */
+export async function resolverUuidCarpetaPriorizandoExpedienteAlmacenado(
+  alfTicket: string,
+  radicadoNorm: string,
+  sgdeExpedienteAlfrescoId: string | null | undefined
+): Promise<string | null> {
+  const desdeBd = (sgdeExpedienteAlfrescoId && String(sgdeExpedienteAlfrescoId).trim()) || null
+  const expId = desdeBd || (await buscarNodoExpedienteId(alfTicket, radicadoNorm))
+  if (!expId) return null
+  let nodeUuid = await resolverUuidCarpetaDesdeExpedienteId(alfTicket, expId)
+  if (!nodeUuid) {
+    const aseg = await asegurarEstructuraPrimeraInstanciaYPrincipal(alfTicket, expId)
+    if (aseg.ok) {
+      nodeUuid = await resolverUuidCarpetaDesdeExpedienteId(alfTicket, expId)
+    }
+  }
+  return nodeUuid
 }
 
 function tipoDocumentalLegible(camel: string): string {
@@ -292,7 +771,8 @@ function tipoDocumentalLegible(camel: string): string {
   return sanitizarNombre(out)
 }
 
-async function countPdfPages(buffer: Buffer): Promise<number> {
+/** Cuenta páginas de un PDF en memoria (metadatos SGDE y rango acumulativo en expediente). */
+export async function contarPaginasPdfSgde(buffer: Buffer): Promise<number> {
   try {
     const { PDFParse } = await import('pdf-parse')
     const parser = new PDFParse({ data: buffer })
@@ -317,6 +797,23 @@ export type SubirSgdeParams = {
   orden?: number
   mimeType: string
   extension: string
+  /**
+   * CUI del expediente (23 dígitos). El `nodeUuid` de subida suele ser la carpeta «Principal»,
+   * que no tiene `rama:nomExpediente`; sin CUI el SGDE registra el documento mal y el visor PDF falla.
+   */
+  nomExpedienteCui?: string
+  /**
+   * Rango de páginas dentro del índice del expediente (acumulativo). Si no se envían, se usa 1…paginas del archivo.
+   */
+  paginaInicioDoc?: number
+  paginaFinDoc?: number
+}
+
+/** Metadatos HTTP de Azure solo admiten ASCII en la práctica; evita cabeceras inválidas. */
+function valorMetaAzureAscii(val: string, maxLen = 400): string {
+  let s = val.replace(/[^\x20-\x7e]/g, '_')
+  if (s.length > maxLen) s = s.slice(0, maxLen)
+  return s
 }
 
 export async function subirArchivoSgde(p: SubirSgdeParams): Promise<{ ok: boolean; detalle?: string }> {
@@ -329,7 +826,18 @@ export async function subirArchivoSgde(p: SubirSgdeParams): Promise<{ ok: boolea
   const account = sas.account ?? 'stalfrescoprod'
   if (!sasToken) return { ok: false, detalle: 'Sin sasToken' }
 
-  const meta = p.metadata && Object.keys(p.metadata).length ? p.metadata : await getNodeMetadata(token, nodeUuid)
+  const metaBase = await getNodeMetadata(token, nodeUuid)
+  const metaOverrides = p.metadata ?? {}
+  const meta: Record<string, string> = { ...metaBase, ...metaOverrides }
+  const nomExp = (meta.nomExpediente || p.nomExpedienteCui || '').replace(/\D/g, '').trim()
+  if (!nomExp) {
+    return {
+      ok: false,
+      detalle:
+        'Falta el CUI en metadatos (rama:nomExpediente). El padre de subida es la carpeta Principal, que no incluye el expediente: indique el radicado de 23 dígitos (nomExpedienteCui).',
+    }
+  }
+  meta.nomExpediente = nomExp
   const tipoLegible = tipoDocumentalLegible(tipoDocumental)
   const idDoc = p.orden ?? (await getSiguienteOrden(alfTicket, nodeUuid))
   const filesize = buffer.length
@@ -348,8 +856,10 @@ export async function subirArchivoSgde(p: SubirSgdeParams): Promise<{ ok: boolea
 
   let paginas = 1
   if (p.extension.toLowerCase() === '.pdf') {
-    paginas = await countPdfPages(buffer)
+    paginas = await contarPaginasPdfSgde(buffer)
   }
+  const paginaInicio = p.paginaInicioDoc ?? 1
+  const paginaFin = p.paginaFinDoc ?? paginas
 
   const formato = p.extension.toLowerCase() === '.pdf' ? 'PDF' : 'DOCX'
   const mimetype =
@@ -366,10 +876,10 @@ export async function subirArchivoSgde(p: SubirSgdeParams): Promise<{ ok: boolea
   const azureHeaders: Record<string, string> = {
     'Content-Type': 'application/octet-stream',
     'x-ms-blob-type': 'BlockBlob',
-    'x-ms-meta-cui': meta.nomExpediente ?? '',
+    'x-ms-meta-cui': valorMetaAzureAscii(meta.nomExpediente),
     'x-ms-meta-fecha_carga': fechaCarga,
-    'x-ms-meta-originalname': nombreArchivoSgde,
-    'x-ms-meta-username': username,
+    'x-ms-meta-originalname': valorMetaAzureAscii(nombreArchivoSgde),
+    'x-ms-meta-username': valorMetaAzureAscii(username || 'usuario'),
     'x-ms-meta-uuid': 'temporal',
     'x-ms-version': '2025-05-05',
   }
@@ -402,9 +912,9 @@ export async function subirArchivoSgde(p: SubirSgdeParams): Promise<{ ok: boolea
     'rama:tipoDocumental': tipoLegible,
     'rama:palabrasClave': '',
     'rama:acceso': nivelAcceso,
-    'cm:title': '-',
-    'rama:paginaInicioDoc': 1,
-    'rama:paginaFinDoc': paginas,
+    'cm:title': s(nombreArchivoSgde) || '-',
+    'rama:paginaInicioDoc': paginaInicio,
+    'rama:paginaFinDoc': paginaFin,
     'rama:tamano': filesize,
     'rama:formato': formato,
     'rama:paginas': paginas,

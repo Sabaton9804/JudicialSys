@@ -43,6 +43,7 @@ model Usuario {
   memoriales          Memorial[] @relation("MemorialesRecibidosPor")
   terminosResponsable  Termino[] @relation("TerminosResponsable")
   oficiosResponsable   Oficio[] @relation("OficiosResponsable")
+  plantillasDocumentoCreadas PlantillaDocumento[] @relation("PlantillasCreador")
 
   @@map("usuarios")
 }
@@ -88,6 +89,8 @@ model Juzgado {
   direccion       String?
   telefono        String?
   email           String?
+  /** UUID Alfresco de la carpeta donde el despacho crea expedientes (Serie/Subserie/Despacho). Opcional; si falta, usar env SGDE_PARENT_EXPEDIENTES_NODE_ID o el cuerpo de la petición. */
+  sgdeContenedorExpedientesUuid String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -97,6 +100,7 @@ model Juzgado {
   ubicaciones     Ubicacion[]
   tiposProcesoEstadistica TipoProcesoEstadistica[]
   edicionesEstado       EdicionEstado[]
+  plantillasDocumento   PlantillaDocumento[]
 
   @@map("juzgados")
 }
@@ -207,6 +211,13 @@ model Proceso {
   consultaSubclaseProceso       String?  // ej. POR SUMAS DE DINERO
   consultaRecurso               String?  // ej. SIN TIPO DE RECURSO
   consultaUbicacionExpediente   String?  // ej. SECRETARIA - LETRA
+
+  /** Nodo Alfresco del expediente en SGDE (tras crear o enlazar desde JudicialSys). */
+  sgdeExpedienteAlfrescoId String?
+  sgdeExpedienteCreadoAt   DateTime?
+
+  /** Metadatos SGDE inferidos por IA al analizar la demanda (serie, subserie, nombre expediente, etc.). */
+  demandaSgdeMetadata Json?
 
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -909,6 +920,35 @@ enum TipoActuacion {
   ARCHIVO
   OBSERVACION
   OTRO
+}
+
+// ==================== PLANTILLAS DE DOCUMENTOS (informe ingreso, etc.) ====================
+
+enum TipoPlantillaDocumento {
+  INFORME_INGRESO_DESPACHO
+  OFICIO
+  CONSTANCIA
+  MEMORIAL
+}
+
+model PlantillaDocumento {
+  id            String                 @id @default(cuid())
+  juzgadoId     String? // null = plantilla global del sistema
+  tipo          TipoPlantillaDocumento
+  nombre        String
+  htmlContenido String // HTML con {{variables}}; saneado al guardar
+  version       Int                    @default(1)
+  activa        Boolean                @default(true)
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  juzgado   Juzgado?  @relation(fields: [juzgadoId], references: [id], onDelete: Cascade)
+  createdBy Usuario?  @relation("PlantillasCreador", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([juzgadoId, tipo, activa])
+  @@map("plantillas_documento")
 }
 
 // ==================== CUADERNOS (carpetas virtuales del expediente) ====================

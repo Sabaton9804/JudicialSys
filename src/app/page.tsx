@@ -19,7 +19,8 @@ import {
   Search, Users, Building2, CheckCircle2, XCircle, AlertCircle, Timer,
   Send, Plus, RefreshCw, Wifi, WifiOff, Download, Eye, Upload,   FolderOpen, File, ListOrdered,
   ClipboardList, UserPlus, History, Archive, Briefcase, Play, CheckSquare, BarChart3,
-  MessageSquare, PenTool, BookOpen, Scale, FileSignature, Shield, Pencil, MapPin, Trash2, ExternalLink
+  MessageSquare, PenTool, BookOpen, Scale, FileSignature, Shield, Pencil, MapPin, Trash2, ExternalLink,
+  LayoutTemplate
 } from 'lucide-react'
 import { useWebSocket } from '@/hooks/use-websocket'
 import { useUserStore } from '@/stores/user-store'
@@ -1574,6 +1575,17 @@ export default function GestorSecretariaJudicial() {
                 {sidebarOpen && <ExternalLink className="w-4 h-4 ml-auto opacity-60" />}
               </a>
             </li>
+            {simulatedUser && (
+              <li>
+                <Link
+                  href="/plantillas-documento"
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-amber-800 hover:bg-amber-50 font-medium border border-amber-100"
+                >
+                  <LayoutTemplate className="w-5 h-5 shrink-0 text-amber-700" />
+                  {sidebarOpen && <span>Plantillas de documentos</span>}
+                </Link>
+              </li>
+            )}
           </ul>
         </nav>
 

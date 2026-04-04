@@ -2,12 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getUserFromHeader, juzgadoWhere } from '@/lib/auth-utils'
 import {
+  contarPaginasPdfSgde,
+  getMaxPaginaFinDoc,
   login,
   normalizarRadicadoSgde,
-  resolverUuidCarpeta,
+  resolverUuidCarpetaPriorizandoExpedienteAlmacenado,
   resolveSgdeCredentials,
   subirArchivoSgde,
 } from '@/lib/sgde/client'
+import { leerSgdeExpedienteAlmacenado } from '@/lib/sgde/persist-proceso-sgde-db'
+import { clasificarTiposDocumentalesSgdeIA } from '@/lib/sgde/clasificar-tipo-documental-sgde-ia'
+import { prioridadOrdenSubidaPrincipalPorNombre } from '@/lib/sgde/subir-archivos-locales-sgde'
 
 export const runtime = 'nodejs'
 
@@ -23,6 +28,7 @@ export type BatchItemResult = {
   nombreOriginal: string
   nombreSgde: string
   ok: boolean
+  tipoDocumental?: string
   error?: string
 }
 
@@ -30,7 +36,7 @@ export type BatchItemResult = {
  * Carga masiva al SGDE (equivalente al flujo MagnusPro: un login, varios archivos al mismo radicado/carpeta).
  * FormData: file (repetido por cada archivo), procesoId, sgdeUsuario, sgdePassword,
  * opcional: tipoDocumental, nivelAcceso, rutaDestino.
- * Cada archivo puede usar nombre visible distinto; por defecto se toma del nombre del fichero subido.
+ * Si tipoDocumental es vacío o «Auto», se clasifica cada archivo con IA según el catálogo SGDE.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -67,7 +73,9 @@ export async function POST(request: NextRequest) {
     }
 
     const procesoId = formData.get('procesoId') as string | null
-    const tipoDocumental = (formData.get('tipoDocumental') as string | null)?.trim() || 'Auto'
+    const tipoDocumentalRaw = (formData.get('tipoDocumental') as string | null)?.trim() || 'Auto'
+    const usarIaPorArchivo = !tipoDocumentalRaw || /^auto$/i.test(tipoDocumentalRaw)
+    const tipoDocumentalFijo = usarIaPorArchivo ? 'Auto' : tipoDocumentalRaw
     let nivelAcceso = (formData.get('nivelAcceso') as string | null)?.trim() || 'Reservado'
     if (nivelAcceso === 'Publico') nivelAcceso = 'Público'
     if (!NIVELES.has(nivelAcceso)) nivelAcceso = 'Reservado'
@@ -118,30 +126,59 @@ export async function POST(request: NextRequest) {
     }
 
     const { token, alfTicket } = await login(cred.usuario, cred.password)
-    let nodeUuid = await resolverUuidCarpeta(alfTicket, radicadoNorm, rutaDestino)
+    const sgdeExpedienteId = (await leerSgdeExpedienteAlmacenado(procesoId)).alfrescoId
+    const nodeUuid = await resolverUuidCarpetaPriorizandoExpedienteAlmacenado(
+      alfTicket,
+      radicadoNorm,
+      sgdeExpedienteId
+    )
     if (!nodeUuid) {
       return NextResponse.json(
         {
           success: false,
           error:
-            'No se encontró el expediente en SGDE o no hay acceso. Verifique el radicado y las credenciales.',
+            'En el SGDE aún no existe expediente con este radicado, no se pudieron crear las carpetas (Primera instancia / Principal) o no hay acceso. Cree el expediente desde JudicialSys («Crear expediente en SGDE») y reintente.',
         },
         { status: 422 }
       )
     }
 
+    const filesSorted = [...files].sort((a, b) => {
+      const pa = prioridadOrdenSubidaPrincipalPorNombre(a.name)
+      const pb = prioridadOrdenSubidaPrincipalPorNombre(b.name)
+      if (pa !== pb) return pa - pb
+      return a.name.localeCompare(b.name, 'es')
+    })
+
+    const tiposIa = usarIaPorArchivo
+      ? await clasificarTiposDocumentalesSgdeIA(
+          filesSorted.map((f) => ({
+            nombreOriginal: f.name,
+            carpeta: 'OTROS',
+          }))
+        )
+      : null
+
     const resultados: BatchItemResult[] = []
     let okCount = 0
+    let cursor = (await getMaxPaginaFinDoc(alfTicket, nodeUuid)) + 1
 
-    for (const file of files) {
+    for (let i = 0; i < filesSorted.length; i++) {
+      const file = filesSorted[i]!
+      const tipoDoc =
+        usarIaPorArchivo && tiposIa ? tiposIa[i] ?? 'OtrosDocumentos' : tipoDocumentalFijo
       const ext = '.' + (file.name.split('.').pop() || 'pdf').toLowerCase()
       const baseName = file.name.replace(/[/\\]/g, '_')
       const nombreArchivoSgde =
         baseName.toLowerCase().endsWith('.pdf') || baseName.toLowerCase().endsWith('.docx')
           ? baseName
-          : `${tipoDocumental.replace(/\s+/g, '')}${ext === '.pdf' ? '.pdf' : '.docx'}`
+          : `${tipoDoc.replace(/\s+/g, '')}${ext === '.pdf' ? '.pdf' : '.docx'}`
 
       const buffer = Buffer.from(await file.arrayBuffer())
+      let paginas = 1
+      if (ext === '.pdf') paginas = await contarPaginasPdfSgde(buffer)
+      const paginaInicioDoc = cursor
+      const paginaFinDoc = cursor + paginas - 1
 
       const result = await subirArchivoSgde({
         token,
@@ -149,24 +186,30 @@ export async function POST(request: NextRequest) {
         buffer,
         nombreArchivoSgde,
         nodeUuid,
-        tipoDocumental,
+        tipoDocumental: tipoDoc,
         nivelAcceso,
+        nomExpedienteCui: radicadoNorm,
         mimeType: file.type,
         extension: ext,
+        paginaInicioDoc,
+        paginaFinDoc,
       })
 
       if (result.ok) {
+        cursor = paginaFinDoc + 1
         okCount++
         resultados.push({
           nombreOriginal: file.name,
           nombreSgde: nombreArchivoSgde,
           ok: true,
+          tipoDocumental: tipoDoc,
         })
       } else {
         resultados.push({
           nombreOriginal: file.name,
           nombreSgde: nombreArchivoSgde,
           ok: false,
+          tipoDocumental: tipoDoc,
           error: result.detalle || 'Error al registrar en SGDE',
         })
       }
@@ -177,11 +220,11 @@ export async function POST(request: NextRequest) {
       data: {
         radicado: proceso.radicado,
         rutaDestino,
-        tipoDocumental,
+        tipoDocumental: usarIaPorArchivo ? 'Auto (IA por archivo)' : tipoDocumentalFijo,
         nivelAcceso,
-        total: files.length,
+        total: filesSorted.length,
         subidosOk: okCount,
-        fallidos: files.length - okCount,
+        fallidos: filesSorted.length - okCount,
         resultados,
       },
     })

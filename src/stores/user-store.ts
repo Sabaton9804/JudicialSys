@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
 export interface SimulatedUser {
   id: string
@@ -14,7 +15,12 @@ interface UserStore {
   setUser: (user: SimulatedUser | null) => void
 }
 
-export const useUserStore = create<UserStore>((set) => ({
-  user: null,
-  setUser: (user) => set({ user }),
-}))
+export const useUserStore = create<UserStore>()(
+  persist(
+    (set) => ({
+      user: null,
+      setUser: (user) => set({ user }),
+    }),
+    { name: 'judicialsys-simulated-user' }
+  )
+)

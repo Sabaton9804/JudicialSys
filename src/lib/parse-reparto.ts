@@ -23,6 +23,23 @@ export interface DatosExtraidos {
   documentoDemandado?: string
   /** Otros datos relevantes en una sola cadena (IA). */
   observacionesExtraccion?: string
+  /** Informe en texto (CGP): secciones 1–5, sin análisis de fondo. */
+  informeDemandaProcesal?: string
+  /** Declarativo | Ejecutivo | Liquidatorio | Especial (clasificación CGP). */
+  claseProcesoGrupoCGP?: string
+  apoderadosDemandante?: string
+  apoderadosDemandado?: string
+  tipoPersonaDemandante?: string
+  tipoPersonaDemandado?: string
+
+  /** SGDE — valores para radicación documental (también se persisten en el proceso tras analizar demanda). */
+  sgdeSerie?: string
+  sgdeSubserie?: string
+  /** Denominación del expediente (no el CUI). */
+  sgdeNombreExpediente?: string
+  sgdeCodigoSubserie?: string
+  /** CIVIL | CONSTITUCIONAL según el escrito; alinea Serie del SGDE. */
+  sgdeCategoriaProceso?: string
 }
 
 const PATRONES = {
