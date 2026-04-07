@@ -105,7 +105,7 @@ export default function EjemploTutelaEmlPage() {
           </CardHeader>
           <CardContent>
             <ol className="list-decimal list-inside space-y-2 text-sm text-slate-700">
-              <li>Página principal → <strong>Crear expediente</strong> → pestaña tutela / importar .eml.</li>
+              <li>Página principal → menú lateral <strong>Radicación</strong> → importar el .eml.</li>
               <li>Seleccione el archivo descargado y envíe: se crea el expediente con todos los documentos anteriores.</li>
               <li>O use <strong>Paquete ZIP</strong> desde el mismo .eml para un ZIP ordenado sin tocar la base de datos.</li>
             </ol>

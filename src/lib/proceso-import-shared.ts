@@ -23,14 +23,54 @@ export type ArchivoImportRow = {
 const CODIGO_BASE_DEFAULT = '110013103051'
 
 /**
- * Acta de reparto del Grupo de Reparto: PDF con nombre tipo "SEC 9822 J 51.pdf".
- * En expediente debe figurar como ActaReparto.pdf (misma pieza que la «secuencia de reparto» del correo).
+ * Nombres de PDF consolidados / constancia en importación EML-ZIP (PascalCase: una mayúscula inicial por palabra).
+ * Compatibilidad: siguen reconociéndose `Demanda.pdf`, `PruebasAnexos.pdf` y `AnexosPrueba.pdf` en carpetas y parseo.
+ */
+export const PDF_CANONICO_CORREO_REPARTO = 'CorreoReparto.pdf'
+export const PDF_CANONICO_ACTA_REPARTO = 'ActaReparto.pdf'
+export const PDF_CANONICO_ANEXOS_PRUEBAS = 'AnexosPruebas.pdf'
+export const PDF_CANONICO_ESCRITO_DEMANDA = 'EscritoDemanda.pdf'
+export const PDF_CANONICO_PODER = 'Poder.pdf'
+
+/** PDF con nombre consolidado estándar (sin prefijo `link_` al guardar desde enlace). Incluye legados. */
+export function esPdfNombreConsolidadoTramiteLinea(leaf: string): boolean {
+  const s = (leaf.split('/').pop() || leaf).trim().toLowerCase()
+  const canon = new Set([
+    PDF_CANONICO_CORREO_REPARTO.toLowerCase(),
+    PDF_CANONICO_ACTA_REPARTO.toLowerCase(),
+    PDF_CANONICO_ANEXOS_PRUEBAS.toLowerCase(),
+    PDF_CANONICO_ESCRITO_DEMANDA.toLowerCase(),
+    PDF_CANONICO_PODER.toLowerCase(),
+    'demanda.pdf',
+    'pruebasanexos.pdf',
+    'anexosprueba.pdf',
+  ])
+  return canon.has(s)
+}
+
+/**
+ * Correo/ZIP «Demanda en línea» (civil, Rama), p. ej. asunto o archivo
+ * `RV_ Generación de la Demanda en línea No … .eml`. No debe clasificarse como tutela.
+ */
+export function textoSugiereDemandaCivilEnLinea(texto: string): boolean {
+  if (!texto.trim()) return false
+  return (
+    /demanda\s+en\s+l[ií]nea/i.test(texto) ||
+    /generaci[oó]n\s+de\s+la\s+demanda/i.test(texto)
+  )
+}
+
+/**
+ * Acta de reparto: PDF del correo con nombre tipo "SEC 9822 J 51.pdf" (Grupo de Reparto)
+ * o "JUZ 51CC ACTA REPARTO 10091.pdf" (juzgado). En expediente se unifica como ActaReparto.pdf.
  */
 export function nombreBaseActaRepartoSiEsSecPdf(basename: string): string {
   const b = basename.trim()
   if (!/\.pdf$/i.test(b)) return basename
-  if (!/^sec\s+\d+/i.test(b)) return basename
-  return 'ActaReparto.pdf'
+  if (/^sec\s+\d+/i.test(b)) return 'ActaReparto.pdf'
+  const lower = b.toLowerCase()
+  if (lower.includes('acta') && lower.includes('reparto')) return 'ActaReparto.pdf'
+  return basename
 }
 
 /** Aplica renombre ActaReparto al último segmento de una ruta (p. ej. dentro de un ZIP). */
@@ -63,16 +103,18 @@ export function clasificarCarpetaNombre(nombre: string): CarpetaArchivo {
   const base = nombre.split('/').pop() || nombre
   const n = base.toLowerCase()
   if (/secuencia/i.test(n) && (n.startsWith('00') || /\.txt$/i.test(base))) return 'CONSTANCIAS'
-  if (/^demanda_/i.test(base)) return 'DEMANDA'
-  if (/^demanda\.pdf$/i.test(base)) return 'DEMANDA'
-  if (/^prueba_/i.test(base)) return 'ANEXOS'
-  if (/^pruebasanexos\.pdf$/i.test(base)) return 'ANEXOS'
-  if (/^anexosprueba\.pdf$/i.test(base)) return 'ANEXOS'
+  // Tutela/demanda en línea (Rama): DEMANDA_1_… o DEMANDA25032026_… (sin guion bajo tras la palabra)
+  if (/^demanda_/i.test(base) || /^demanda\d/i.test(base)) return 'DEMANDA'
+  if (/^(demanda|escritodemanda)\.pdf$/i.test(base)) return 'DEMANDA'
+  if (/^prueba_/i.test(base) || /^prueba\d/i.test(base)) return 'ANEXOS'
+  if (/^(pruebasanexos|anexosprueba|anexospruebas)\.pdf$/i.test(base)) return 'ANEXOS'
   if (/^poder\.pdf$/i.test(base)) return 'PODERES'
-  if (/^poder_/i.test(base)) return 'PODERES'
+  if (/^poder_/i.test(base) || /^poder\d/i.test(base)) return 'PODERES'
   if (/apoderamiento/i.test(n) && /\.pdf$/i.test(base)) return 'PODERES'
   if (/^actareparto\.pdf$/i.test(base)) return 'ACTA_REPARTO'
   if (/^correoreparto\.pdf$/i.test(base)) return 'CONSTANCIAS'
+  // Acta reparto civil: p. ej. "12133 JDO 51 CCTO.pdf" (JDO + CCTO, sin "acta" en el nombre)
+  if (/\bjdo\b/i.test(base) && /\bccto\b/i.test(n) && /\.pdf$/i.test(base)) return 'ACTA_REPARTO'
   if (n.includes('acta') || n.includes('reparto') || /^sec\s+\d+/i.test(base)) return 'ACTA_REPARTO'
   if (n.includes('informe') || n.includes('ingreso')) return 'INFORME_INGRESO_DESPACHO'
   if (n.includes('anexo')) return 'ANEXOS'
@@ -177,8 +219,19 @@ export async function crearProcesoDesdeImportacion(params: {
     .join(' · ')
     .slice(0, 1200)
 
-  const esTutela = forzarTutela || datos.claseProceso === 'TUTELA' || /tutela/i.test(textosParaParseo.join(' '))
-  const claseFinal = (esTutela ? 'TUTELA' : datos.claseProceso || 'ORDINARIO') as ClaseProceso
+  const textoContextoImport = `${observacionesOrigen}\n${textosParaParseo.join('\n')}`
+  const pistasDemandaCivilEnLinea = textoSugiereDemandaCivilEnLinea(textoContextoImport)
+
+  let esTutela = Boolean(
+    forzarTutela || datos.claseProceso === 'TUTELA' || /tutela/i.test(textosParaParseo.join(' '))
+  )
+  if (pistasDemandaCivilEnLinea) esTutela = false
+
+  const claseProcesoDatos = datos.claseProceso as ClaseProceso | undefined
+  const claseNoTutela =
+    pistasDemandaCivilEnLinea && claseProcesoDatos === 'TUTELA' ? undefined : claseProcesoDatos
+
+  const claseFinal = (esTutela ? 'TUTELA' : claseNoTutela || 'ORDINARIO') as ClaseProceso
   const categoriaFinal = claseFinal === 'TUTELA' ? 'CONSTITUCIONAL' : 'CIVIL'
 
   const juzgado = await db.juzgado.findUnique({ where: { id: juzgadoId } })

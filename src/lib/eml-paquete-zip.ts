@@ -8,6 +8,7 @@ import {
 import {
   esAdjuntoOutlookEmbeddedIgnorable,
   nombreBaseActaRepartoSiEsSecPdf,
+  PDF_CANONICO_CORREO_REPARTO,
   rutaConActaRepartoSiEsSecPdf,
 } from '@/lib/proceso-import-shared'
 
@@ -34,7 +35,7 @@ export async function construirZipPaqueteDesdeEml(
 
   const archivos: { nombre: string; buffer: Buffer }[] = []
   archivos.push({
-    nombre: `${prefijo}/CorreoReparto.pdf`,
+    nombre: `${prefijo}/${PDF_CANONICO_CORREO_REPARTO}`,
     buffer: pdfCorreo,
   })
 

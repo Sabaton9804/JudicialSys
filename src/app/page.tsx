@@ -20,7 +20,7 @@ import {
   Send, Plus, RefreshCw, Wifi, WifiOff, Download, Eye, Upload,   FolderOpen, File, ListOrdered,
   ClipboardList, UserPlus, History, Archive, Briefcase, Play, CheckSquare, BarChart3,
   MessageSquare, PenTool, BookOpen, Scale, FileSignature, Shield, Pencil, MapPin, Trash2, ExternalLink,
-  LayoutTemplate
+  LayoutTemplate, Stamp
 } from 'lucide-react'
 import { useWebSocket } from '@/hooks/use-websocket'
 import { useUserStore } from '@/stores/user-store'
@@ -485,7 +485,10 @@ export default function GestorSecretariaJudicial() {
 
   // Al cambiar a Despacho, mostrar Expedientes por defecto
   useEffect(() => {
-    if (activeArea === 'DESPACHO' && !['dashboard', 'planner', 'tutelas', 'procesos', 'tareas'].includes(activeTab)) {
+    if (
+      activeArea === 'DESPACHO' &&
+      !['dashboard', 'planner', 'tutelas', 'radicacion', 'procesos', 'tareas'].includes(activeTab)
+    ) {
       setActiveTab('dashboard')
     }
   }, [activeArea])
@@ -1066,9 +1069,7 @@ export default function GestorSecretariaJudicial() {
   const handleCrearProcesoDesdeEml = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const form = e.currentTarget
-    const fileInput =
-      (form.querySelector('#tutela-eml-file') as HTMLInputElement) ||
-      (form.querySelector('input[name="file"]') as HTMLInputElement)
+    const fileInput = form.querySelector('input[type="file"]') as HTMLInputElement
     const file = fileInput?.files?.[0]
     if (!file) {
       toast.error('Seleccione un archivo .eml')
@@ -1102,6 +1103,7 @@ export default function GestorSecretariaJudicial() {
         )
         fileInput.value = ''
         fetchTutelas()
+        fetchProcesosCiviles()
         fetchDashboard()
         if (data.data.proceso?.id) openExpediente(data.data.proceso.id)
       } else {
@@ -1475,6 +1477,7 @@ export default function GestorSecretariaJudicial() {
               <>
                 {[
                   { id: 'tutelas', icon: Scale, label: 'Tutelas', badge: dashboardData?.resumen?.procesos?.tutelas },
+                  { id: 'radicacion', icon: Stamp, label: 'Radicación' },
                   { id: 'dashboard', icon: Home, label: 'Expedientes' },
                   { id: 'planner', icon: Calendar, label: 'Mi agenda', badge: plannerStats?.pendientes },
                   { id: 'procesos', icon: Briefcase, label: 'Todos los Procesos' },
@@ -1488,12 +1491,24 @@ export default function GestorSecretariaJudicial() {
                           ? activeTab === 'tutelas'
                             ? 'bg-violet-100 text-violet-800 font-semibold border border-violet-200'
                             : 'text-violet-700 hover:bg-violet-50 font-medium'
-                          : activeTab === item.id 
-                            ? 'bg-purple-50 text-purple-700 font-medium' 
-                            : 'text-gray-600 hover:bg-gray-100'
+                          : item.id === 'radicacion'
+                            ? activeTab === 'radicacion'
+                              ? 'bg-teal-50 text-teal-800 font-semibold border border-teal-200'
+                              : 'text-teal-700 hover:bg-teal-50 font-medium'
+                            : activeTab === item.id
+                              ? 'bg-purple-50 text-purple-700 font-medium'
+                              : 'text-gray-600 hover:bg-gray-100'
                       }`}
                     >
-                      <item.icon className={item.id === 'tutelas' ? 'w-5 h-5 text-violet-600' : 'w-5 h-5'} />
+                      <item.icon
+                        className={
+                          item.id === 'tutelas'
+                            ? 'w-5 h-5 text-violet-600'
+                            : item.id === 'radicacion'
+                              ? 'w-5 h-5 text-teal-600'
+                              : 'w-5 h-5'
+                        }
+                      />
                       {sidebarOpen && (
                         <>
                           <span>{item.label}</span>
@@ -1512,6 +1527,7 @@ export default function GestorSecretariaJudicial() {
               <>
                 {[
                   { id: 'tutelas', icon: Scale, label: 'Tutelas', badge: dashboardData?.resumen?.procesos?.tutelas },
+                  { id: 'radicacion', icon: Stamp, label: 'Radicación' },
                   { id: 'dashboard', icon: Home, label: 'Dashboard' },
                   { id: 'proveer', icon: FileText, label: 'Publicar en Estado', badge: dashboardData?.secretaria?.providenciasParaPublicar?.count },
                   { id: 'memoriales', icon: Mail, label: 'Memoriales' },
@@ -1529,12 +1545,24 @@ export default function GestorSecretariaJudicial() {
                           ? activeTab === 'tutelas'
                             ? 'bg-violet-100 text-violet-800 font-semibold border border-violet-200'
                             : 'text-violet-700 hover:bg-violet-50 font-medium'
-                          : activeTab === item.id 
-                            ? 'bg-blue-50 text-blue-700 font-medium' 
-                            : 'text-gray-600 hover:bg-gray-100'
+                          : item.id === 'radicacion'
+                            ? activeTab === 'radicacion'
+                              ? 'bg-teal-50 text-teal-800 font-semibold border border-teal-200'
+                              : 'text-teal-700 hover:bg-teal-50 font-medium'
+                            : activeTab === item.id
+                              ? 'bg-blue-50 text-blue-700 font-medium'
+                              : 'text-gray-600 hover:bg-gray-100'
                       }`}
                     >
-                      <item.icon className={item.id === 'tutelas' ? 'w-5 h-5 text-violet-600' : 'w-5 h-5'} />
+                      <item.icon
+                        className={
+                          item.id === 'tutelas'
+                            ? 'w-5 h-5 text-violet-600'
+                            : item.id === 'radicacion'
+                              ? 'w-5 h-5 text-teal-600'
+                              : 'w-5 h-5'
+                        }
+                      />
                       {sidebarOpen && (
                         <>
                           <span>{item.label}</span>
@@ -1638,6 +1666,7 @@ export default function GestorSecretariaJudicial() {
                   {activeTab === 'audiencias' && 'Agenda de Audiencias'}
                   {activeTab === 'planner' && 'Mi agenda'}
                   {activeTab === 'tutelas' && 'Acciones de Tutela'}
+                  {activeTab === 'radicacion' && 'Radicación'}
                   {activeTab === 'tareas' && 'Tareas Internas'}
                   {activeTab === 'procesos' && 'Procesos Judiciales'}
                   {activeTab === 'usuarios' && 'Gestión de Usuarios'}
@@ -1666,7 +1695,14 @@ export default function GestorSecretariaJudicial() {
                   className="pl-10 w-64"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && (activeTab === 'tutelas' ? fetchTutelas() : activeTab === 'procesos' ? fetchProcesosCiviles() : null)}
+                  onKeyDown={(e) =>
+                    e.key === 'Enter' &&
+                    (activeTab === 'tutelas'
+                      ? fetchTutelas()
+                      : activeTab === 'procesos'
+                        ? fetchProcesosCiviles()
+                        : null)
+                  }
                 />
               </div>
               <Button variant="outline" size="icon" className="relative">
@@ -2720,6 +2756,126 @@ export default function GestorSecretariaJudicial() {
             </div>
           )}
 
+          {/* ==================== RADICACIÓN (.eml, utilidades reparto) ==================== */}
+          {activeTab === 'radicacion' && (
+            <div className="space-y-6">
+              <div className="rounded-2xl bg-gradient-to-r from-teal-800 via-slate-800 to-slate-900 p-6 text-white shadow-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div className="w-14 h-14 bg-white/15 rounded-xl flex items-center justify-center shrink-0">
+                    <Stamp className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold">Radicación</h2>
+                    <p className="text-teal-100/90 text-sm mt-1 max-w-3xl">
+                      Cree expedientes desde el <strong className="text-white">correo (.eml)</strong> exportado en Outlook:{' '}
+                      <strong>tutela en línea</strong>, <strong>demanda en línea</strong>, reparto del Grupo de Reparto o del juzgado.
+                      El sistema asigna <strong className="text-white">civil u constitucional</strong> según el asunto y el contenido del mensaje.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <Card className="border-teal-300 bg-gradient-to-b from-teal-50/80 to-white shadow-md ring-1 ring-teal-200/70">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg text-teal-950">1. Importar .eml y crear expediente</CardTitle>
+                  <CardDescription className="text-teal-950/85 text-sm">
+                    Se generan <code className="text-xs bg-white px-1 rounded">CorreoReparto.pdf</code>, se procesan adjuntos y ZIP, y se descargan enlaces permitidos de la Rama cuando el HTML los trae. Radicado de 23 dígitos; al terminar se abre el expediente.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-5 pt-0">
+                  <form
+                    onSubmit={handleCrearProcesoDesdeEml}
+                    className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-end gap-3 rounded-xl border-2 border-teal-400/45 bg-white p-4 shadow-sm"
+                  >
+                    <div className="flex flex-col gap-2 min-w-[220px] flex-1">
+                      <label htmlFor="radicacion-eml-file" className="text-sm font-semibold text-teal-950">
+                        Archivo de correo (.eml)
+                      </label>
+                      <Input
+                        id="radicacion-eml-file"
+                        name="file"
+                        type="file"
+                        accept=".eml,.EML"
+                        required
+                        disabled={importandoEmlTutela}
+                        className="text-sm cursor-pointer"
+                      />
+                      <p className="text-xs text-gray-600">
+                        Outlook: abrir el mensaje → Archivo → Guardar como → formato correo (.eml). Sin adjuntos también se intenta extraer datos del cuerpo.
+                      </p>
+                    </div>
+                    <Button
+                      type="submit"
+                      size="lg"
+                      className="bg-teal-600 hover:bg-teal-700 text-white shrink-0 sm:min-w-[220px]"
+                      disabled={importandoEmlTutela}
+                    >
+                      {importandoEmlTutela ? 'Importando correo…' : 'Radicar desde este .eml'}
+                    </Button>
+                  </form>
+                </CardContent>
+              </Card>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Card className="border-slate-200">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base text-slate-900">2. Otras entradas al expediente</CardTitle>
+                    <CardDescription className="text-sm">
+                      Reparto con PDF sueltos, creación manual o solo orden de documentos sin tocar la base de datos.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-2 pt-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-cyan-600 text-cyan-900 justify-start"
+                      onClick={() => {
+                        setShowCrearExpediente(true)
+                        setCrearExpedienteTab('reparto')
+                      }}
+                    >
+                      <FolderOpen className="w-4 h-4 mr-2 shrink-0" />
+                      Crear expediente (reparto / manual / otros)
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-cyan-600 text-cyan-900 justify-start"
+                      onClick={() => {
+                        setShowCrearExpediente(true)
+                        setCrearExpedienteTab('orden')
+                      }}
+                    >
+                      <ListOrdered className="w-4 h-4 mr-2 shrink-0" />
+                      Orden documentos y paquete ZIP desde .eml
+                    </Button>
+                  </CardContent>
+                </Card>
+                <Card className="border-cyan-200 bg-cyan-50/40">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base text-cyan-950">Ejemplo y referencia</CardTitle>
+                    <CardDescription className="text-cyan-950/85 text-sm">
+                      Expediente de prueba <strong>2026-300</strong> tras{' '}
+                      <code className="text-[11px] bg-white px-1 rounded">npx tsx prisma/seed.ts</code>
+                      — radicado{' '}
+                      <span className="font-mono text-[11px]">11001310305120260030000</span>. El número del portal web no sustituye al CUI.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <a
+                      href="/ejemplos/RV_Generacion_Tutela_en_linea_No_202600358.eml"
+                      download="RV_Generacion_Tutela_en_linea_No_202600358.eml"
+                      className="inline-flex items-center rounded-md border border-cyan-600 bg-white px-3 py-2 text-sm font-medium text-cyan-800 hover:bg-cyan-50"
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Descargar .eml de ejemplo (tutela en línea)
+                    </a>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          )}
+
           {/* ==================== TUTELAS (Acciones de Tutela - Art. 86 CP) ==================== */}
           {activeTab === 'tutelas' && (
             <div className="space-y-6">
@@ -2738,72 +2894,20 @@ export default function GestorSecretariaJudicial() {
                   Protección inmediata de derechos constitucionales fundamentales. Fallo de inmediato cumplimiento.
                 </p>
               </div>
-              <Card className="border-emerald-400 bg-gradient-to-b from-emerald-50/90 to-white shadow-md ring-1 ring-emerald-200/80">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg text-emerald-950">1. Cargar el correo y crear el expediente (lo que pediste)</CardTitle>
-                  <CardDescription className="text-emerald-950/90 text-sm">
-                    Elige el archivo <strong>.eml</strong> (exportado desde Outlook o descargado) y pulsa el botón. El sistema <strong>lee el mensaje y adjuntos</strong>, rellena demandante/demandado/objeto cuando puede, <strong>crea la tutela</strong> en la base de datos con <strong>radicado de 23 dígitos</strong> y guarda los archivos en el expediente. Luego te abre el expediente.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-5 pt-0">
-                  <form
-                    onSubmit={handleCrearProcesoDesdeEml}
-                    className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-end gap-3 rounded-xl border-2 border-emerald-500/40 bg-white p-4 shadow-sm"
+              <Card className="border-violet-200 bg-violet-50/60">
+                <CardContent className="py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <p className="text-sm text-violet-950">
+                    Para <strong>radicar desde correo (.eml)</strong> — tutela o civil — use el apartado{' '}
+                    <strong>Radicación</strong> en el menú lateral.
+                  </p>
+                  <Button
+                    type="button"
+                    className="bg-teal-600 hover:bg-teal-700 text-white shrink-0"
+                    onClick={() => setActiveTab('radicacion')}
                   >
-                    <div className="flex flex-col gap-2 min-w-[220px] flex-1">
-                      <label htmlFor="tutela-eml-file" className="text-sm font-semibold text-emerald-950">
-                        Archivo de correo (.eml)
-                      </label>
-                      <Input
-                        id="tutela-eml-file"
-                        name="file"
-                        type="file"
-                        accept=".eml,.EML"
-                        required
-                        disabled={importandoEmlTutela}
-                        className="text-sm cursor-pointer"
-                      />
-                      <p className="text-xs text-gray-600">
-                        Sin adjuntos también funciona: se usan accionante/accionado y texto del cuerpo del correo.
-                      </p>
-                    </div>
-                    <Button
-                      type="submit"
-                      size="lg"
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white shrink-0 sm:min-w-[200px]"
-                      disabled={importandoEmlTutela}
-                    >
-                      {importandoEmlTutela ? 'Creando tutela…' : 'Crear expediente desde este .eml'}
-                    </Button>
-                  </form>
-                  <div className="rounded-lg border border-cyan-200 bg-cyan-50/60 px-3 py-2 text-sm text-cyan-950">
-                    <p className="font-medium text-cyan-900 mb-1">Expediente de ejemplo en base de datos: 2026-300</p>
-                    <p className="text-cyan-950/90 text-xs leading-relaxed">
-                      Tras <code className="text-[11px] bg-white px-1 rounded">npx tsx prisma/seed.ts</code> existe la tutela <strong>2026-300</strong> con radicado{' '}
-                      <span className="font-mono text-[11px]">11001310305120260030000</span> (mismas partes que el .eml). El <strong>No 202600358</strong> del portal sigue siendo solo la <strong>referencia del trámite web</strong>.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3 pt-1 border-t border-gray-200">
-                    <a
-                      href="/ejemplos/RV_Generacion_Tutela_en_linea_No_202600358.eml"
-                      download="RV_Generacion_Tutela_en_linea_No_202600358.eml"
-                      className="inline-flex items-center rounded-md border border-cyan-600 bg-white px-3 py-2 text-sm font-medium text-cyan-800 hover:bg-cyan-50"
-                    >
-                      <Download className="w-4 h-4 mr-2" />
-                      Descargar .eml de ejemplo
-                    </a>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="border-cyan-600 text-cyan-900 hover:bg-cyan-100"
-                      onClick={() => {
-                        setShowCrearExpediente(true)
-                        setCrearExpedienteTab('orden')
-                      }}
-                    >
-                      Generar paquete ZIP (otra utilidad)
-                    </Button>
-                  </div>
+                    <Stamp className="w-4 h-4 mr-2" />
+                    Ir a Radicación
+                  </Button>
                 </CardContent>
               </Card>
               <div className="flex justify-between items-center gap-2">
@@ -2899,6 +3003,17 @@ export default function GestorSecretariaJudicial() {
                   Nuevo proceso
                 </Button>
               </div>
+              <Card className="border-amber-200 bg-amber-50/50">
+                <CardContent className="py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <p className="text-sm text-amber-950">
+                    <strong>Demanda en línea o reparto civil:</strong> radique desde el apartado <strong>Radicación</strong> (mismo importador .eml).
+                  </p>
+                  <Button type="button" variant="outline" className="border-teal-600 text-teal-800 shrink-0" onClick={() => setActiveTab('radicacion')}>
+                    <Stamp className="w-4 h-4 mr-2" />
+                    Ir a Radicación
+                  </Button>
+                </CardContent>
+              </Card>
               <Card>
                 <CardContent className="p-0">
                   <div className="overflow-x-auto">
@@ -4101,7 +4216,7 @@ export default function GestorSecretariaJudicial() {
                   {descargandoPaqueteEml ? 'Generando ZIP…' : 'Descargar paquete ZIP (PDF correo + secuencia)'}
                 </Button>
                 <p className="text-xs text-gray-600">
-                  Incluye: constancia PDF del mensaje (protocolo), <code className="text-[11px]">00_INDICE_SECUENCIA.txt</code>, y orden sugerido: correo → acta SEC → demanda → PruebasAnexos → poder (si aplica). Si el correo trae un ZIP adjunto (tutela en línea), se descomprime y entra al orden.
+                  Incluye: constancia PDF del mensaje (protocolo), <code className="text-[11px]">00_INDICE_SECUENCIA.txt</code>, y orden sugerido: correo → acta SEC → EscritoDemanda → AnexosPruebas → poder (si aplica). Si el correo trae un ZIP adjunto (tutela en línea), se descomprime y entra al orden.
                 </p>
               </form>
               <p className="text-sm text-gray-600 pt-2 border-t border-gray-200">

@@ -2,7 +2,9 @@ import JSZip from 'jszip'
 import {
   clasificarCarpetaNombre,
   esAdjuntoOutlookEmbeddedIgnorable,
+  esPdfNombreConsolidadoTramiteLinea,
   nombreBaseActaRepartoSiEsSecPdf,
+  PDF_CANONICO_ESCRITO_DEMANDA,
   type ArchivoImportRow,
 } from '@/lib/proceso-import-shared'
 import { extraerTexto } from '@/lib/extract-documento'
@@ -119,6 +121,45 @@ function esBufferProbableZip(buf: Buffer): boolean {
   )
 }
 
+/** PDF aunque la URL sea un UUID y el servidor mande octet-stream sin Content-Disposition útil. */
+function esBufferProbablePdf(buf: Buffer): boolean {
+  return buf.length >= 4 && buf.subarray(0, 4).toString('latin1') === '%PDF'
+}
+
+/**
+ * Tutela en línea a veces devuelve un solo PDF (sin ZIP). El nombre en URL suele ser un UUID.
+ * En ese caso usamos `EscritoDemanda.pdf`, igual que tras consolidar el ZIP con DEMANDA_*.pdf.
+ */
+function esNombrePdfGenericoEnlaceTutela(baseRen: string): boolean {
+  if (!/\.pdf$/i.test(baseRen)) return false
+  if (/^actareparto\.pdf$/i.test(baseRen)) return false
+  const stem = baseRen.replace(/\.pdf$/i, '').trim()
+  if (!stem) return true
+  if (/^(descarga|documento|download|file)$/i.test(stem)) return true
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stem)) return true
+  if (/^[0-9a-f-]{32,}$/i.test(stem) && /-/.test(stem)) return true
+  return false
+}
+
+function nombrePdfEnlaceTutelaLinea(
+  baseRen: string,
+  demandaPdfDesdeEnlaceYaAsignado: { value: boolean }
+): string {
+  if (!/\.pdf$/i.test(baseRen)) return baseRen
+  if (/^actareparto\.pdf$/i.test(baseRen)) return baseRen
+  if (esNombrePdfGenericoEnlaceTutela(baseRen) && !demandaPdfDesdeEnlaceYaAsignado.value) {
+    demandaPdfDesdeEnlaceYaAsignado.value = true
+    return PDF_CANONICO_ESCRITO_DEMANDA
+  }
+  return baseRen
+}
+
+/** PDF consolidados (EscritoDemanda, ActaReparto, …) van sin prefijo `link_`. */
+function rutaArchivoDesdeEnlace(prefijoNombre: string, leaf: string): string {
+  if (esPdfNombreConsolidadoTramiteLinea(leaf)) return `${prefijoNombre}/${leaf}`
+  return `${prefijoNombre}/link_${leaf}`
+}
+
 export type ResultadoEnlace = { ok: true; archivos: ArchivoImportRow[] } | { ok: false; url: string; error: string }
 
 /**
@@ -133,6 +174,8 @@ export async function descargarArchivosDesdeEnlacesHtml(
   const textosExtra: string[] = []
   const avisos: string[] = []
   let avisoZipTutelaLinea = false
+  let avisoPdfUnicoTutelaLinea = false
+  const demandaPdfEnlace = { value: false }
 
   for (const url of urls) {
     if (!urlPermitidaDescargaJudicial(url)) {
@@ -182,6 +225,14 @@ export async function descargarArchivosDesdeEnlacesHtml(
 
       const ct = (res.headers.get('content-type') || '').toLowerCase()
 
+      if (esBufferProbablePdf(buf)) {
+        baseName = baseName.replace(/\.bin$/i, '.pdf')
+        if (!/\.pdf$/i.test(baseName)) {
+          const stem = baseName.includes('.') ? baseName.replace(/\.[^.]+$/, '') : baseName
+          baseName = `${stem || 'documento'}.pdf`
+        }
+      }
+
       const pareceOfficeZip =
         /\.(docx|xlsx|pptx|odt|ods|odp)$/i.test(baseName)
       const tratarComoZip =
@@ -204,7 +255,7 @@ export async function descargarArchivosDesdeEnlacesHtml(
           if (!avisoZipTutelaLinea) {
             avisoZipTutelaLinea = true
             textosExtra.push(
-              '[ZIP desde enlace del correo — típico enlace «Archivo» en tutela en línea: DEMANDA_, PRUEBA_ y PODER_ dentro del ZIP; se consolidan en Demanda.pdf, PruebasAnexos.pdf y Poder.pdf si aplica]'
+              '[ZIP desde enlace del correo — típico enlace «Archivo» en tutela/demanda en línea: DEMANDA_, PRUEBA_ y PODER_ dentro del ZIP; se consolidan en EscritoDemanda.pdf, AnexosPruebas.pdf y Poder.pdf si aplica]'
             )
           }
           const prefijoZip = baseName.replace(/\.(zip|bin)$/i, '') || 'descarga'
@@ -234,15 +285,26 @@ export async function descargarArchivosDesdeEnlacesHtml(
               if (t) textosExtra.push(`[${leaf}]\n${t}`)
             }
           }
-        } else if (baseName.toLowerCase().endsWith('.pdf') || ct.includes('pdf')) {
+        } else if (
+          baseName.toLowerCase().endsWith('.pdf') ||
+          ct.includes('pdf') ||
+          esBufferProbablePdf(buf)
+        ) {
           const baseRen = nombreBaseActaRepartoSiEsSecPdf(baseName)
+          const leaf = nombrePdfEnlaceTutelaLinea(baseRen, demandaPdfEnlace)
+          if (leaf === PDF_CANONICO_ESCRITO_DEMANDA && baseRen !== leaf && !avisoPdfUnicoTutelaLinea) {
+            avisoPdfUnicoTutelaLinea = true
+            textosExtra.push(
+              '[PDF único desde enlace del correo (trámite en línea sin ZIP) — nombrado EscritoDemanda.pdf, equivalente al paquete con DEMANDA_*.pdf]'
+            )
+          }
           archivos.push({
-            nombre: `${prefijoNombre}/link_${baseRen}`,
+            nombre: rutaArchivoDesdeEnlace(prefijoNombre, leaf),
             buffer: buf,
-            carpeta: clasificarCarpetaNombre(baseRen),
+            carpeta: clasificarCarpetaNombre(leaf),
           })
-          const t = await extraerTexto(buf, baseRen)
-          if (t) textosExtra.push(`[${baseRen}]\n${t}`)
+          const t = await extraerTexto(buf, leaf)
+          if (t) textosExtra.push(`[${leaf}]\n${t}`)
         } else {
           avisos.push(
             `Respuesta con firma ZIP pero no se pudo abrir como ZIP (¿HTML de error o enlace caducado?): ${url}`
@@ -253,15 +315,26 @@ export async function descargarArchivosDesdeEnlacesHtml(
             carpeta: clasificarCarpetaNombre(baseName),
           })
         }
-      } else if (baseName.toLowerCase().endsWith('.pdf') || ct.includes('pdf')) {
+      } else if (
+        baseName.toLowerCase().endsWith('.pdf') ||
+        ct.includes('pdf') ||
+        esBufferProbablePdf(buf)
+      ) {
         const baseRen = nombreBaseActaRepartoSiEsSecPdf(baseName)
+        const leaf = nombrePdfEnlaceTutelaLinea(baseRen, demandaPdfEnlace)
+        if (leaf === PDF_CANONICO_ESCRITO_DEMANDA && baseRen !== leaf && !avisoPdfUnicoTutelaLinea) {
+          avisoPdfUnicoTutelaLinea = true
+          textosExtra.push(
+            '[PDF único desde enlace del correo (trámite en línea sin ZIP) — nombrado EscritoDemanda.pdf, equivalente al paquete con DEMANDA_*.pdf]'
+          )
+        }
         archivos.push({
-          nombre: `${prefijoNombre}/link_${baseRen}`,
+          nombre: rutaArchivoDesdeEnlace(prefijoNombre, leaf),
           buffer: buf,
-          carpeta: clasificarCarpetaNombre(baseRen),
+          carpeta: clasificarCarpetaNombre(leaf),
         })
-        const t = await extraerTexto(buf, baseRen)
-        if (t) textosExtra.push(`[${baseRen}]\n${t}`)
+        const t = await extraerTexto(buf, leaf)
+        if (t) textosExtra.push(`[${leaf}]\n${t}`)
       } else {
         archivos.push({
           nombre: `${prefijoNombre}/link_${baseName}`,

@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
       orden,
       advertencias: advertenciasOrden(ordenBase),
       descripcionOrden:
-        'Secuencia: 1 Constancia del correo (PDF) · 2 Acta de reparto (SEC…) · 3 Demanda · 4 Pruebas y anexos (PRUEBA_) · 5 Poder si aplica · 6 Informe. Suba el .eml de Outlook y el ZIP de tutela en línea en el mismo envío.',
+        'Secuencia: 1 Constancia del correo (PDF) · 2 Acta de reparto (SEC…) · 3 EscritoDemanda · 4 AnexosPruebas (PRUEBA_) · 5 Poder si aplica · 6 Informe. Suba el .eml de Outlook y el ZIP de tutela/demanda en línea en el mismo envío.',
       instruccionesOutlook:
         'En Outlook: abra el correo de reparto → Archivo → Guardar como → elija formato .eml (mensaje de Internet). Ese archivo puede subirse solo o junto al ZIP descargado del trámite en línea.',
     })

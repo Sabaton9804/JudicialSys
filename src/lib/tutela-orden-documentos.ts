@@ -10,9 +10,9 @@ import type { ArchivoImportRow } from '@/lib/proceso-import-shared'
  * 2) **Acta de reparto** — PDF que acompaña ese correo (p. ej. `SEC … J … .pdf`), que deja constancia
  *    escrita del reparto. Va **después** del correo y **antes** del material que baja de tutela en línea.
  *
- * 3) **Demanda** — `DEMANDA_….pdf` en el ZIP (se consolida en `Demanda.pdf`).
+ * 3) **Demanda** — `DEMANDA_….pdf` en el ZIP (se consolida en `EscritoDemanda.pdf`).
  *
- * 4) **Pruebas y anexos** — `PRUEBA_….pdf` (se consolidan en `PruebasAnexos.pdf`).
+ * 4) **Pruebas y anexos** — `PRUEBA_….pdf` (se consolidan en `AnexosPruebas.pdf`).
  *
  * 5) **Poder** — Si el ZIP trae `PODER_….pdf` u homónimos (se consolida en `Poder.pdf` → carpeta PODERES).
  *
@@ -39,7 +39,7 @@ export const ETIQUETA_ROL_TUTELA: Record<RolDocumentoTutela, string> = {
   CORREO_TUTELA_LINEA:
     'Correo de tutela en línea (notificación / generación; constancia en PDF)',
   ACTA_REPARTO: 'Acta de reparto (constancia PDF, p. ej. SEC … J …)',
-  ANEXOS: 'Pruebas y anexos (PRUEBA_ en ZIP; consolidado PruebasAnexos.pdf)',
+  ANEXOS: 'Pruebas y anexos (PRUEBA_ en ZIP; consolidado AnexosPruebas.pdf)',
   DEMANDA: 'Demanda (DEMANDA_ en ZIP tutela en línea)',
   PODER: 'Poder / apoderamiento (PODER_ en ZIP; consolidado Poder.pdf)',
   INFORME_INGRESO: 'Informe de ingreso',
@@ -89,6 +89,7 @@ function esNombreActaReparto(n: string, lower: string): boolean {
   if (/^actareparto\.pdf$/i.test(n)) return true
   if (/^sec\s+\d+/i.test(n) || /\bsec\s*\d+\s*j\s*\d+/i.test(n)) return true
   if (lower.includes('acta') && lower.includes('reparto')) return true
+  if (/\bjdo\b/i.test(n) && lower.includes('ccto') && /\.pdf$/i.test(n)) return true
   return false
 }
 
@@ -146,13 +147,13 @@ export function inferirRolDocumentoTutela(nombre: string): RolDocumentoTutela {
     return 'CORREO_TUTELA_LINEA'
   }
 
-  if (/^demanda_/i.test(n)) return 'DEMANDA'
-  if (/^demanda\.pdf$/i.test(n)) return 'DEMANDA'
+  if (/^demanda_/i.test(n) || /^demanda\d/i.test(n)) return 'DEMANDA'
+  if (/^(demanda|escritodemanda)\.pdf$/i.test(n)) return 'DEMANDA'
 
-  if (/^pruebasanexos\.pdf$/i.test(n) || /^anexosprueba\.pdf$/i.test(n)) return 'ANEXOS'
-  if (/^prueba_/i.test(n)) return 'ANEXOS'
+  if (/^(pruebasanexos|anexosprueba|anexospruebas)\.pdf$/i.test(n)) return 'ANEXOS'
+  if (/^prueba_/i.test(n) || /^prueba\d/i.test(n)) return 'ANEXOS'
 
-  if (/^poder_/i.test(n)) return 'PODER'
+  if (/^poder_/i.test(n) || /^poder\d/i.test(n)) return 'PODER'
   if (/^poder\.pdf$/i.test(n)) return 'PODER'
   if (/apoderamiento/i.test(lower) && /\.pdf$/i.test(n)) return 'PODER'
 

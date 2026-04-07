@@ -2,7 +2,7 @@
  * Parsea documentos judiciales usando OpenAI (GPT) para mayor precisión.
  * Requiere OPENAI_API_KEY en .env
  *
- * Prioridad: si en la importación hay texto extraído del **escrito de demanda** (Demanda.pdf / DEMANDA_*),
+ * Prioridad: si en la importación hay texto extraído del **escrito de demanda** (EscritoDemanda.pdf / Demanda.pdf legado / DEMANDA_*),
  * se usa `parsearDemandaConIA` con un prompt específico; si no, se analiza el conjunto de textos con `parsearConIA`.
  */
 import OpenAI from 'openai'
@@ -239,7 +239,11 @@ export function extraerTextoDemandaDesdeTextosImportacion(textos: string[]): str
   const MIN_CHARS = 40
   for (const bloque of textos) {
     const linea = bloque.split('\n')[0] ?? ''
-    if (/^\[Demanda\.pdf\]/i.test(linea) || /^\[DEMANDA_/i.test(linea)) {
+    if (
+      /^\[EscritoDemanda\.pdf\]/i.test(linea) ||
+      /^\[Demanda\.pdf\]/i.test(linea) ||
+      /^\[DEMANDA_/i.test(linea)
+    ) {
       const cuerpo = bloque.replace(/^\[[^\]]+\]\s*\n?/, '').trim()
       if (cuerpo.length >= MIN_CHARS) return cuerpo.slice(0, 16000)
     }

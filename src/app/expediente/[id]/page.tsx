@@ -1410,7 +1410,7 @@ export default function ExpedientePage() {
                 {archivosDemandaAnalisis.length > 1 && (
                   <div className="flex flex-col gap-1.5 max-w-md">
                     <Label htmlFor="radicacion-demanda-archivo" className="text-xs text-gray-600">
-                      Escrito a tomar (opcional: por defecto <code className="text-[11px]">Demanda.pdf</code> o el más
+                      Escrito a tomar (opcional: por defecto <code className="text-[11px]">EscritoDemanda.pdf</code> o el más
                       reciente)
                     </Label>
                     <select
@@ -2426,6 +2426,11 @@ export default function ExpedientePage() {
               : 'max-w-[min(96vw,1520px)] w-[min(96vw,1520px)] h-[min(92vh,920px)] max-h-[92vh] rounded-xl border border-slate-200/80'
           )}
         >
+          <DialogTitle className="sr-only">
+            {sgdeVisor
+              ? `${sgdeVisor.pdfs[sgdeVisor.index]?.nombre || 'Documento'} — ${sgdeVisor.nombreCarpeta}`
+              : 'Visor de documento SGDE'}
+          </DialogTitle>
           {sgdeVisor && (
             <>
               <div className="flex shrink-0 items-center gap-2 border-b border-black/10 bg-[#1b1b1b] px-3 py-2.5 text-white sm:px-4">

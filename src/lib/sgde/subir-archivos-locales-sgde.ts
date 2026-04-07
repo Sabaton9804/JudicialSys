@@ -12,7 +12,13 @@ export function prioridadOrdenSubidaPrincipalPorNombre(nombreOriginal: string): 
 
   if (n.includes('correo') && n.includes('reparto')) return 1
   if (n.includes('acta') && n.includes('reparto')) return 2
-  if (n.includes('prueba') || n.includes('pruebasanexos') || n.includes('anexosprueba')) return 3
+  if (
+    n.includes('prueba') ||
+    n.includes('pruebasanexos') ||
+    n.includes('anexosprueba') ||
+    n.includes('anexospruebas')
+  )
+    return 3
   if (n.includes('demanda') && /\.(pdf|docx)$/i.test(base)) return 4
 
   return 100

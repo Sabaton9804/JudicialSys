@@ -6,6 +6,8 @@ import {
   clasificarCarpetaNombre,
   esAdjuntoOutlookEmbeddedIgnorable,
   nombreBaseActaRepartoSiEsSecPdf,
+  PDF_CANONICO_CORREO_REPARTO,
+  textoSugiereDemandaCivilEnLinea,
   type ArchivoImportRow,
 } from '@/lib/proceso-import-shared'
 import { generarPdfCorreoVistaImpresion } from '@/lib/correo-a-pdf'
@@ -17,6 +19,7 @@ const EXT = ['.pdf', '.doc', '.docx', '.txt']
 
 /**
  * Lee un .eml: texto del cuerpo para parseo + adjuntos MIME + ZIP + enlaces HTTPS (Rama) + PDF del correo.
+ * Sirve para **tutela en línea** y para **demanda en línea** (civil): el ZIP suele usar los mismos prefijos DEMANDA_/PRUEBA_/PODER_.
  */
 export async function prepararImportacionDesdeEml(
   buffer: Buffer,
@@ -85,7 +88,13 @@ export async function prepararImportacionDesdeEml(
   const forzarTutela = /tutela/i.test(sujeto)
 
   if (ref) {
-    textos.unshift(`[Referencia tutela en línea: ${ref}]`)
+    const contextoRef = `${subject} ${nombreEml} ${cuerpoHtml} ${parsed.text || ''}`
+    const etiquetaRef = textoSugiereDemandaCivilEnLinea(contextoRef)
+      ? 'Referencia demanda en línea (Rama)'
+      : /tutela/i.test(sujeto)
+        ? 'Referencia tutela en línea'
+        : 'Referencia trámite web (Rama)'
+    textos.unshift(`[${etiquetaRef}: ${ref}]`)
   }
 
   /** Enlaces https en el HTML (misma Rama): descarga ZIP/PDF y descomprime; ahí suelen venir acta, demanda, etc. */
@@ -102,7 +111,7 @@ export async function prepararImportacionDesdeEml(
 
   const conCorreo: ArchivoImportRow[] = [
     {
-      nombre: `${prefijo}/CorreoReparto.pdf`,
+      nombre: `${prefijo}/${PDF_CANONICO_CORREO_REPARTO}`,
       buffer: pdfBuf,
       carpeta: 'CONSTANCIAS',
     },

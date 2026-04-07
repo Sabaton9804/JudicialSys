@@ -2,11 +2,24 @@ import { PDFDocument } from 'pdf-lib'
 import {
   clasificarCarpetaNombre,
   esAdjuntoOutlookEmbeddedIgnorable,
+  PDF_CANONICO_ANEXOS_PRUEBAS,
+  PDF_CANONICO_ESCRITO_DEMANDA,
+  PDF_CANONICO_PODER,
   rutaConActaRepartoSiEsSecPdf,
   type ArchivoImportRow,
 } from '@/lib/proceso-import-shared'
 
 export type InnerZipEntry = { relativePath: string; buffer: Buffer }
+
+function esPrefijoDemandaLineaRama(leaf: string): boolean {
+  return /^demanda_/i.test(leaf) || /^demanda\d/i.test(leaf)
+}
+function esPrefijoPruebaLineaRama(leaf: string): boolean {
+  return /^prueba_/i.test(leaf) || /^prueba\d/i.test(leaf)
+}
+function esPrefijoPoderLineaRama(leaf: string): boolean {
+  return /^poder_/i.test(leaf) || /^poder\d/i.test(leaf)
+}
 
 async function fusionarPdfs(buffers: Buffer[]): Promise<Buffer> {
   const merged = await PDFDocument.create()
@@ -19,7 +32,7 @@ async function fusionarPdfs(buffers: Buffer[]): Promise<Buffer> {
 }
 
 /**
- * Tras descomprimir el ZIP de tutela en línea: Demanda.pdf, PruebasAnexos.pdf, Poder.pdf (si aplica);
+ * Tras descomprimir el ZIP (tutela/demanda en línea): EscritoDemanda.pdf, AnexosPruebas.pdf, Poder.pdf (si aplica);
  * el resto (acta SEC, etc.) se conserva. Orden lógico: otros → demanda → pruebas → poder (luego se reordena al importar).
  */
 export async function consolidarZipTutelaEnLinea(
@@ -34,7 +47,7 @@ export async function consolidarZipTutelaEnLinea(
   for (const f of innerFiles) {
     const leaf = f.relativePath.split('/').pop() || f.relativePath
     if (esAdjuntoOutlookEmbeddedIgnorable(leaf)) continue
-    if (/^demanda_/i.test(leaf)) {
+    if (esPrefijoDemandaLineaRama(leaf)) {
       if (leaf.toLowerCase().endsWith('.pdf'))
         demandaItems.push({ leaf, relativePath: f.relativePath, buffer: f.buffer })
       else {
@@ -47,7 +60,7 @@ export async function consolidarZipTutelaEnLinea(
       }
       continue
     }
-    if (/^prueba_/i.test(leaf)) {
+    if (esPrefijoPruebaLineaRama(leaf)) {
       if (leaf.toLowerCase().endsWith('.pdf'))
         pruebaItems.push({ leaf, relativePath: f.relativePath, buffer: f.buffer })
       else {
@@ -60,7 +73,7 @@ export async function consolidarZipTutelaEnLinea(
       }
       continue
     }
-    if (/^poder_/i.test(leaf)) {
+    if (esPrefijoPoderLineaRama(leaf)) {
       if (leaf.toLowerCase().endsWith('.pdf'))
         poderItems.push({ leaf, relativePath: f.relativePath, buffer: f.buffer })
       else {
@@ -96,7 +109,7 @@ export async function consolidarZipTutelaEnLinea(
       const buf =
         demandaPdfs.length === 1 ? demandaPdfs[0]! : await fusionarPdfs(demandaPdfs)
       bloques.push({
-        nombre: `${basePath}/Demanda.pdf`,
+        nombre: `${basePath}/${PDF_CANONICO_ESCRITO_DEMANDA}`,
         buffer: buf,
         carpeta: 'DEMANDA',
       })
@@ -117,7 +130,7 @@ export async function consolidarZipTutelaEnLinea(
       const buf =
         pruebaPdfs.length === 1 ? pruebaPdfs[0]! : await fusionarPdfs(pruebaPdfs)
       bloques.push({
-        nombre: `${basePath}/PruebasAnexos.pdf`,
+        nombre: `${basePath}/${PDF_CANONICO_ANEXOS_PRUEBAS}`,
         buffer: buf,
         carpeta: 'ANEXOS',
       })
@@ -138,7 +151,7 @@ export async function consolidarZipTutelaEnLinea(
       const buf =
         poderPdfs.length === 1 ? poderPdfs[0]! : await fusionarPdfs(poderPdfs)
       bloques.push({
-        nombre: `${basePath}/Poder.pdf`,
+        nombre: `${basePath}/${PDF_CANONICO_PODER}`,
         buffer: buf,
         carpeta: 'PODERES',
       })

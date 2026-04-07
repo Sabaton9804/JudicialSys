@@ -66,7 +66,7 @@ CATÁLOGO (usa EXACTAMENTE uno de los códigos \`codigo\` entre backticks, sin i
 ${textoCatalogoTipoDocumentalParaPrompt()}
 
 Reglas:
-- El nombre del archivo y la carpeta en JudicialSys son pistas fuertes (p. ej. DEMANDA, ActaReparto, DEMANDA_*, SEC*, CorreoReparto).
+- El nombre del archivo y la carpeta en JudicialSys son pistas fuertes (p. ej. DEMANDA, EscritoDemanda.pdf, ActaReparto, DEMANDA_*, SEC*, CorreoReparto).
 - Tutelas: solicitud inicial → SolicitudDeTutela o EscritoDeDemanda según contexto.
 - Si no encaja bien, usa OtrosDocumentos.
 

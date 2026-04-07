@@ -22,7 +22,7 @@ type ArchivoRow = {
 
 function prioridadNombreDemanda(nombreOriginal: string): number {
   const n = nombreOriginal.toLowerCase()
-  if (n === 'demanda.pdf') return 100
+  if (n === 'escritodemanda.pdf' || n === 'demanda.pdf') return 100
   if (/^demanda_/.test(n)) return 90
   if (n.includes('demanda') && n.endsWith('.pdf')) return 70
   if (n.endsWith('.pdf')) return 50
