@@ -2,6 +2,10 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "main": ".open-next/worker.js",
   "name": "judicialsys",
+  "build": {
+    "command": "bun run build:cloudflare",
+    "cwd": "."
+  },
   "compatibility_date": "2026-04-07",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": {
