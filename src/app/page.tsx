@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -169,7 +169,7 @@ const ROLES_LABEL: Record<string, string> = {
   SUPER_ADMIN: 'Super Administrador',
 }
 
-export default function GestorSecretariaJudicial() {
+function GestorSecretariaJudicialContent() {
   const [activeArea, setActiveArea] = useState<'DESPACHO' | 'SECRETARIA' | 'ADMIN'>('SECRETARIA')
   const [activeTab, setActiveTab] = useState('dashboard')
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -4597,6 +4597,20 @@ export default function GestorSecretariaJudicial() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+export default function GestorSecretariaJudicial() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-500">
+          Cargando…
+        </div>
+      }
+    >
+      <GestorSecretariaJudicialContent />
+    </Suspense>
   )
 }
 
