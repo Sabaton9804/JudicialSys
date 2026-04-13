@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { RolUsuario, AreaJuzgado } from '@prisma/client'
-import bcrypt from 'bcrypt'
+import { hashPassword } from '@/lib/password-hash'
 
 // GET - Listar usuarios (filtrable por juzgadoId para super admin)
 export async function GET(request: NextRequest) {
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const passwordHash = await bcrypt.hash(password, 10)
+    const passwordHash = await hashPassword(password, 10)
     const usuario = await db.usuario.create({
       data: {
         email,

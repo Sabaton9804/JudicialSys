@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { EstadoProceso, CategoriaProceso, ClaseProceso } from '@prisma/client'
 import { getUserFromHeader, juzgadoWhere } from '@/lib/auth-utils'
-import { generarRadicado } from '@/lib/radicado'
+import { generarRadicado, normalizarRadicado } from '@/lib/radicado'
 import { generarInformeIngresoDespacho } from '@/lib/plantillas/generar-informe-ingreso-despacho'
 
 // GET - Listar todos los procesos
@@ -111,22 +111,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Se requiere juzgadoId. Cree un juzgado en Administración.' }, { status: 400 })
     }
 
-    // Radicado: SIEMPRE auto-generado (11001-31-03-051 + año + consecutivo)
+    const radicadoManual =
+      body.radicado != null && String(body.radicado).trim() !== ''
+        ? normalizarRadicado(String(body.radicado))
+        : null
+    if (body.radicado != null && String(body.radicado).trim() !== '' && !radicadoManual) {
+      return NextResponse.json(
+        { success: false, error: 'Radicado inválido: debe tener exactamente 23 dígitos numéricos (CUI sin guiones).' },
+        { status: 400 }
+      )
+    }
+    if (radicadoManual) {
+      const ya = await db.proceso.findUnique({ where: { radicado: radicadoManual } })
+      if (ya) {
+        return NextResponse.json({ success: false, error: 'Ese radicado ya existe en el sistema.' }, { status: 409 })
+      }
+    }
+
+    // Radicado: manual (p. ej. proceso ya radicado en línea) o auto-generado (12 dígitos despacho + año + consecutivo)
     const codigoBase = '110013103051' // Bogotá, Circuito 31, Civil 03, Despacho 051
     const juzgado = await db.juzgado.findUnique({ where: { id: juzgadoFinal } })
     const codigo12 = (juzgado?.codigoRadicacion12?.replace(/\D/g, '') || codigoBase).slice(0, 12)
     const anio = new Date().getFullYear()
-    const ultimo = await db.proceso.findFirst({
-      where: { juzgadoId: juzgadoFinal, radicado: { startsWith: codigo12 + String(anio) } },
-      orderBy: { radicado: 'desc' }
-    })
-    const consec = ultimo && ultimo.radicado.length >= 21 ? parseInt(ultimo.radicado.slice(16, 21), 10) + 1 : 1
-    const radicadoFinal = generarRadicado(codigo12, anio, consec)
+    let radicadoFinal: string
+    let instanciaProceso: 'PRIMERA_INSTANCIA' | 'SEGUNDA_INSTANCIA'
+    if (radicadoManual) {
+      radicadoFinal = radicadoManual
+      instanciaProceso = radicadoManual.slice(21, 23) === '01' ? 'SEGUNDA_INSTANCIA' : 'PRIMERA_INSTANCIA'
+    } else {
+      const ultimo = await db.proceso.findFirst({
+        where: { juzgadoId: juzgadoFinal, radicado: { startsWith: codigo12 + String(anio) } },
+        orderBy: { radicado: 'desc' },
+      })
+      const consec = ultimo && ultimo.radicado.length >= 21 ? parseInt(ultimo.radicado.slice(16, 21), 10) + 1 : 1
+      radicadoFinal = generarRadicado(codigo12, anio, consec)
+      instanciaProceso = body.instancia === 'SEGUNDA_INSTANCIA' ? 'SEGUNDA_INSTANCIA' : 'PRIMERA_INSTANCIA'
+    }
 
     const proceso = await db.proceso.create({
       data: {
         radicado: radicadoFinal,
-        instancia: body.instancia === 'SEGUNDA_INSTANCIA' ? 'SEGUNDA_INSTANCIA' : 'PRIMERA_INSTANCIA',
+        instancia: instanciaProceso,
         categoriaProceso: body.categoriaProceso || 'CIVIL',
         claseProceso: body.claseProceso,
         demanda: body.demanda,

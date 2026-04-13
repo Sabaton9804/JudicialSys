@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { RolUsuario, AreaJuzgado } from '@prisma/client'
-import bcrypt from 'bcrypt'
+import { hashPassword } from '@/lib/password-hash'
 
 // PATCH - Actualizar usuario
 export async function PATCH(
@@ -27,7 +27,7 @@ export async function PATCH(
     if (area !== undefined) data.area = area as AreaJuzgado
     if (activo !== undefined) data.activo = activo
     if (password !== undefined && password !== '') {
-      data.password = await bcrypt.hash(password, 10)
+      data.password = await hashPassword(password, 10)
     }
 
     if (rol === 'SUPER_ADMIN') {

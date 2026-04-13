@@ -1,0 +1,62 @@
+================================================================================
+Docker dice "Virtualization support not detected" — qué hacer (Windows)
+================================================================================
+
+Docker necesita que el procesador pueda usar "virtualización" (VT-x en Intel,
+SVM en AMD). Si está apagada en la BIOS o falta algo en Windows, Docker no arranca.
+
+PASO 1 — Ver si Windows ve la virtualización
+---------------------------------------------
+1. Ctrl+Shift+Esc → Administrador de tareas
+2. Pestaña "Rendimiento" → CPU
+3. Abajo debe decir "Virtualización: Activada".
+
+Si dice "Desactivada", hay que encenderla en la BIOS/UEFI (paso 2).
+
+
+PASO 2 — Activar en la BIOS (obligatorio si estaba desactivada)
+----------------------------------------------------------------
+1. Reinicie el equipo.
+2. Al arrancar pulse la tecla de setup (F2, F10, F12, Supr o Esc — depende
+   del fabricante; a veces sale un mensaje en pantalla).
+3. Busque algo como:
+   - Intel: "Intel Virtualization Technology", "VT-x", "Intel VT-d"
+   - AMD: "SVM Mode", "AMD-V"
+4. Póngalo en Enabled / Activado. Guarde y salga (Save & Exit).
+
+
+PASO 3 — Componentes de Windows (después de reiniciar)
+-------------------------------------------------------
+1. Win+R → optionalfeatures → Enter
+2. Active (marque) si puede:
+   - "Plataforma de máquina virtual"
+   - "Subsistema de Windows para Linux" (WSL)
+   - A veces también "Hyper-V" (solo Pro/Enterprise/Education)
+
+3. Reinicie de nuevo.
+
+4. Si usó WSL, en PowerShell como administrador puede ejecutar:
+   wsl --install
+   (y reiniciar si lo pide)
+
+
+PASO 4 — Vuelva a abrir Docker Desktop
+--------------------------------------
+Espere a que diga que el motor está en marcha. Luego en el proyecto:
+   npm run justicia-xxi:local:up
+   npm run justicia-xxi:local:init
+
+
+Si es un equipo del trabajo
+---------------------------
+A veces la BIOS está bloqueada por políticas de TI. En ese caso solo sistemas
+puede activar virtualización o darle otra máquina/VM con esos permisos.
+
+
+¿Necesita Docker para Justicia XXI real?
+----------------------------------------
+No. La base del juzgado es aparte. Docker solo era para una base de PRUEBA
+en su PC. Si no puede usar Docker, puede:
+- Probar "Registrar en Justicia XXI" cuando tenga red/VPN al SQL del juzgado, o
+- Instalar "SQL Server Express" directamente desde Microsoft (sin Docker) si
+  quiere una base local de prueba (otro procedimiento).

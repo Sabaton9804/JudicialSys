@@ -13,6 +13,48 @@
 
 export const RADICADO_LENGTH = 23
 
+/** Primeros 12 dígitos CUI: Bogotá (11001) + circuito 31 + civil (03) + despacho 051. Config fija típica del juzgado; no requiere IA. */
+export const CODIGO_DESPACHO_BOGOTA_CIVIL_CIRCUITO_051 = '110013103051'
+
+export type DesgloseCodigoDespacho12 = {
+  ciudadDane: string
+  circuito: string
+  especialidad: string
+  numeroDespacho: string
+}
+
+/** Desglosa los 12 dígitos ciudad+circuito+especialidad+despacho (Acuerdo 201/1997). */
+export function desglosarCodigoDespacho12(codigo12: string): DesgloseCodigoDespacho12 | null {
+  const d = codigo12.replace(/\D/g, '')
+  if (d.length !== 12) return null
+  return {
+    ciudadDane: d.slice(0, 5),
+    circuito: d.slice(5, 7),
+    especialidad: d.slice(7, 9),
+    numeroDespacho: d.slice(9, 12),
+  }
+}
+
+export type DesgloseRadicado23 = DesgloseCodigoDespacho12 & {
+  anioRadicacion: string
+  consecutivo: string
+  instanciaRadicado: string
+}
+
+/** Desglosa un CUI de 23 dígitos (sin guiones). */
+export function desglosarRadicado23(radicado: string): DesgloseRadicado23 | null {
+  const d = radicado.replace(/\D/g, '')
+  if (d.length !== RADICADO_LENGTH || !/^\d+$/.test(d)) return null
+  const base = desglosarCodigoDespacho12(d.slice(0, 12))
+  if (!base) return null
+  return {
+    ...base,
+    anioRadicacion: d.slice(12, 16),
+    consecutivo: d.slice(16, 21),
+    instanciaRadicado: d.slice(21, 23),
+  }
+}
+
 /** Valida que el radicado tenga exactamente 23 dígitos numéricos (sin guiones ni espacios) */
 export function esRadicadoValido(radicado: string): boolean {
   const limpio = radicado.replace(/\D/g, '')

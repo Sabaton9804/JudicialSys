@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -212,6 +213,16 @@ function GestorSecretariaJudicialContent() {
   const [crearExpedienteTab, setCrearExpedienteTab] = useState<'reparto' | 'orden' | 'manual'>('reparto')
   const [importandoReparto, setImportandoReparto] = useState(false)
   const [importandoEmlTutela, setImportandoEmlTutela] = useState(false)
+  const [registrarJusticiaXxiTrasEml, setRegistrarJusticiaXxiTrasEml] = useState(false)
+  const [justiciaXxiWindowsAuthEml, setJusticiaXxiWindowsAuthEml] = useState(false)
+  const [jxEmlSqlServer, setJxEmlSqlServer] = useState('')
+  const [jxEmlSqlPort, setJxEmlSqlPort] = useState('1433')
+  const [jxEmlSqlDatabase, setJxEmlSqlDatabase] = useState('consejo')
+  const [jxEmlSqlUser, setJxEmlSqlUser] = useState('')
+  const [jxEmlSqlPassword, setJxEmlSqlPassword] = useState('')
+  const [jxEmlPuenteLocalActivo, setJxEmlPuenteLocalActivo] = useState(false)
+  const [jxEmlPuenteEscuchando, setJxEmlPuenteEscuchando] = useState(false)
+  const jxEmlHintsYaAplicados = useRef(false)
   const [preparandoOrdenDoc, setPreparandoOrdenDoc] = useState(false)
   const [descargandoPaqueteEml, setDescargandoPaqueteEml] = useState(false)
   const [resultadoPrepararOrden, setResultadoPrepararOrden] = useState<{
@@ -242,6 +253,42 @@ function GestorSecretariaJudicialContent() {
   // Search
   const [searchQuery, setSearchQuery] = useState('')
   const { user: simulatedUser, setUser: setSimulatedUser } = useUserStore()
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await apiFetch('/api/justicia-xxi/sql-hints', {}, simulatedUser?.id)
+        if (!res.ok || cancelled) return
+        const data = await parseJsonResponse<{
+          success?: boolean
+          data?: {
+            sqlServer?: string
+            sqlPort?: string
+            sqlDatabase?: string
+            suggestWindowsAuth?: boolean
+            puenteLocalActivo?: boolean
+            puenteEscuchando?: boolean
+          }
+        }>(res)
+        const d = data?.data
+        if (!d || cancelled) return
+        setJxEmlPuenteLocalActivo(Boolean(d.puenteLocalActivo))
+        setJxEmlPuenteEscuchando(Boolean(d.puenteEscuchando))
+        if (jxEmlHintsYaAplicados.current) return
+        jxEmlHintsYaAplicados.current = true
+        if (d.sqlServer?.trim()) setJxEmlSqlServer(d.sqlServer.trim())
+        setJxEmlSqlPort(d.sqlPort?.trim() || '1433')
+        if (d.sqlDatabase?.trim()) setJxEmlSqlDatabase(d.sqlDatabase.trim())
+        if (d.suggestWindowsAuth) setJusticiaXxiWindowsAuthEml(true)
+      } catch {
+        /* sin .env */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [simulatedUser?.id])
   const searchParams = useSearchParams()
   const router = useRouter()
 
@@ -995,9 +1042,11 @@ function GestorSecretariaJudicialContent() {
         return
       }
       const instancia = formInstancia || 'PRIMERA_INSTANCIA'
+      const radicadoManual = String(formData.get('radicado') || '').trim()
       const res = await apiFetch('/api/procesos', {
         method: 'POST',
         body: JSON.stringify({
+          ...(radicadoManual ? { radicado: radicadoManual } : {}),
           instancia: instancia === 'SEGUNDA_INSTANCIA' ? 'SEGUNDA_INSTANCIA' : 'PRIMERA_INSTANCIA',
           categoriaProceso: categoriaProceso || 'CIVIL',
           claseProceso,
@@ -1081,8 +1130,27 @@ function GestorSecretariaJudicialContent() {
     }
     setImportandoEmlTutela(true)
     try {
+      if (registrarJusticiaXxiTrasEml) {
+        if (!justiciaXxiWindowsAuthEml && !jxEmlSqlUser.trim()) {
+          toast.error('Escriba el usuario SQL o marque «cuenta de Windows»')
+          setImportandoEmlTutela(false)
+          return
+        }
+      }
       const fd = new FormData()
       fd.append('file', file)
+      if (registrarJusticiaXxiTrasEml) {
+        fd.append('justiciaXxi', '1')
+        fd.append('justiciaXxiSqlServer', jxEmlSqlServer.trim())
+        fd.append('justiciaXxiSqlPort', jxEmlSqlPort.trim())
+        fd.append('justiciaXxiSqlDatabase', jxEmlSqlDatabase.trim() || 'consejo')
+        if (justiciaXxiWindowsAuthEml) {
+          fd.append('justiciaXxiWindowsAuth', '1')
+        } else {
+          fd.append('justiciaXxiSqlUser', jxEmlSqlUser.trim())
+          fd.append('justiciaXxiSqlPassword', jxEmlSqlPassword)
+        }
+      }
       const res = await apiFetch('/api/tutela/crear-desde-eml', { method: 'POST', body: fd }, simulatedUser?.id)
       const data = await parseJsonResponse<{
         success?: boolean
@@ -1091,16 +1159,40 @@ function GestorSecretariaJudicialContent() {
           archivosSubidos: number
           datosExtraidos: unknown
           fusionadoEnExpedienteExistente?: boolean
+          justiciaXxi?: {
+            intentado: boolean
+            ok?: boolean
+            yaExistia?: boolean
+            llave?: string
+            error?: string
+            codigo?: string
+          }
         }
         error?: string
       }>(res)
       if (data?.success && data.data) {
         const fus = data.data.fusionadoEnExpedienteExistente
+        const jx = data.data.justiciaXxi
         toast.success(
           fus
-            ? `Expediente local ${data.data.proceso.radicado}: importación añadida (${data.data.archivosSubidos} archivo(s)). SGDE es aparte.`
+            ? `Expediente local ${data.data.proceso.radicado}: importación añadida (${data.data.archivosSubidos} archivo(s)).`
             : `Proceso ${data.data.proceso.radicado} creado con ${data.data.archivosSubidos} archivo(s)`
         )
+        if (jx?.intentado) {
+          if (jx.ok && jx.llave) {
+            toast.success(
+              jx.yaExistia
+                ? `Ese radicado ya estaba en Justicia XXI (${jx.llave}).`
+                : `Listo en Justicia XXI (${jx.llave}).`,
+              { duration: 7000 }
+            )
+          } else {
+            toast.error(
+              `El expediente quedó creado aquí, pero no en Justicia XXI: ${jx.error || 'revise usuario y contraseña'}`,
+              { duration: 10000 }
+            )
+          }
+        }
         fileInput.value = ''
         fetchTutelas()
         fetchProcesosCiviles()
@@ -2770,6 +2862,7 @@ function GestorSecretariaJudicialContent() {
                       Cree expedientes desde el <strong className="text-white">correo (.eml)</strong> exportado en Outlook:{' '}
                       <strong>tutela en línea</strong>, <strong>demanda en línea</strong>, reparto del Grupo de Reparto o del juzgado.
                       El sistema asigna <strong className="text-white">civil u constitucional</strong> según el asunto y el contenido del mensaje.
+                      Si lo necesita, puede dejar el radicado también en Justicia XXI usando los datos que le den en el juzgado.
                     </p>
                   </div>
                 </div>
@@ -2779,7 +2872,7 @@ function GestorSecretariaJudicialContent() {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg text-teal-950">1. Importar .eml y crear expediente</CardTitle>
                   <CardDescription className="text-teal-950/85 text-sm">
-                    Se generan <code className="text-xs bg-white px-1 rounded">CorreoReparto.pdf</code>, se procesan adjuntos y ZIP, y se descargan enlaces permitidos de la Rama cuando el HTML los trae. Radicado de 23 dígitos; al terminar se abre el expediente.
+                    Se arma el expediente con el correo y los archivos adjuntos. Al terminar se abre el expediente. Si marca la casilla de Justicia XXI, complete los datos que le entregue sistemas o secretaría.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-5 pt-0">
@@ -2803,6 +2896,137 @@ function GestorSecretariaJudicialContent() {
                       <p className="text-xs text-gray-600">
                         Outlook: abrir el mensaje → Archivo → Guardar como → formato correo (.eml). Sin adjuntos también se intenta extraer datos del cuerpo.
                       </p>
+                      <label className="flex items-start gap-2.5 text-sm text-teal-950 cursor-pointer max-w-xl">
+                        <Checkbox
+                          checked={registrarJusticiaXxiTrasEml}
+                          onCheckedChange={(v) => setRegistrarJusticiaXxiTrasEml(v === true)}
+                          disabled={importandoEmlTutela}
+                          className="mt-0.5"
+                          id="radicacion-eml-justicia-xxi"
+                        />
+                        <span>
+                          También <strong>registrar en Justicia XXI</strong> (IP del SQL, base <code className="text-[10px]">consejo</code>, usuario y clave del SIJC; cuenta Windows solo si se lo pidieron explícitamente).
+                        </span>
+                      </label>
+                      {registrarJusticiaXxiTrasEml && (
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2 rounded-lg border border-teal-200 bg-teal-50/90 p-3 w-full max-w-2xl">
+                          <p className="sm:col-span-2 text-xs text-teal-900">
+                            Datos del juzgado (no son su correo ni la clave de la Rama en internet).{' '}
+                            {jxEmlPuenteLocalActivo && !jxEmlPuenteEscuchando ? (
+                              <>
+                                <strong className="text-amber-900">Puente no responde en 3847.</strong> Arranque{' '}
+                                <code className="text-[10px]">npm run dev</code> (puente + web) y abra{' '}
+                                <code className="text-[10px]">http://127.0.0.1:3847/health</code>.
+                              </>
+                            ) : jxEmlPuenteLocalActivo && jxEmlPuenteEscuchando ? (
+                              <>
+                                Con <strong>puente local</strong>, la conexión a SQL la abre el proceso en su PC; igual debe
+                                poder llegar a la IP del servidor SQL. Los campos de abajo siguen siendo necesarios (o en{' '}
+                                <code className="text-[10px]">.env</code>).
+                              </>
+                            ) : (
+                              <>
+                                La conexión la hace el equipo donde corre JudicialSys; debe poder ver la red del juzgado (VPN
+                                si trabaja fuera). Si están en el <code className="text-[10px]">.env</code> del servidor,
+                                estos campos se rellenan solos.
+                              </>
+                            )}
+                          </p>
+                          <label className="sm:col-span-2 flex items-start gap-2 text-xs text-teal-950 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              name="justiciaXxiWindowsAuth"
+                              checked={justiciaXxiWindowsAuthEml}
+                              onChange={(e) => setJusticiaXxiWindowsAuthEml(e.target.checked)}
+                              disabled={importandoEmlTutela}
+                              className="mt-0.5"
+                            />
+                            <span>
+                              <strong>Solo avanzado:</strong> cuenta de Windows (Trusted_Connection). Lo habitual es usuario/clave SQL del SIJC sin marcar esto.
+                            </span>
+                          </label>
+                          <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-[1fr_6rem] gap-2">
+                            <div className="flex flex-col gap-1">
+                              <label htmlFor="jx-sql-server" className="text-xs font-medium text-teal-950">
+                                Equipo servidor
+                              </label>
+                              <Input
+                                id="jx-sql-server"
+                                name="justiciaXxiSqlServer"
+                                type="text"
+                                autoComplete="off"
+                                placeholder="Dirección que le dieron"
+                                disabled={importandoEmlTutela}
+                                className="text-sm"
+                                value={jxEmlSqlServer}
+                                onChange={(e) => setJxEmlSqlServer(e.target.value)}
+                              />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label htmlFor="jx-sql-port" className="text-xs font-medium text-teal-950">
+                                Puerto
+                              </label>
+                              <Input
+                                id="jx-sql-port"
+                                name="justiciaXxiSqlPort"
+                                type="text"
+                                inputMode="numeric"
+                                autoComplete="off"
+                                placeholder="1433"
+                                disabled={importandoEmlTutela}
+                                className="text-sm"
+                                value={jxEmlSqlPort}
+                                onChange={(e) => setJxEmlSqlPort(e.target.value)}
+                              />
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label htmlFor="jx-sql-db" className="text-xs font-medium text-teal-950">
+                              Nombre de la base
+                            </label>
+                            <Input
+                              id="jx-sql-db"
+                              name="justiciaXxiSqlDatabase"
+                              type="text"
+                              autoComplete="off"
+                              disabled={importandoEmlTutela}
+                              className="text-sm"
+                              value={jxEmlSqlDatabase}
+                              onChange={(e) => setJxEmlSqlDatabase(e.target.value)}
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label htmlFor="jx-sql-user" className="text-xs font-medium text-teal-950">
+                              Usuario SQL
+                            </label>
+                            <Input
+                              id="jx-sql-user"
+                              name="justiciaXxiSqlUser"
+                              type="text"
+                              autoComplete="username"
+                              disabled={importandoEmlTutela || justiciaXxiWindowsAuthEml}
+                              className="text-sm"
+                              value={jxEmlSqlUser}
+                              onChange={(e) => setJxEmlSqlUser(e.target.value)}
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label htmlFor="jx-sql-pass" className="text-xs font-medium text-teal-950">
+                              Contraseña SQL
+                            </label>
+                            <Input
+                              id="jx-sql-pass"
+                              name="justiciaXxiSqlPassword"
+                              type="password"
+                              autoComplete="current-password"
+                              disabled={importandoEmlTutela || justiciaXxiWindowsAuthEml}
+                              className="text-sm"
+                              value={jxEmlSqlPassword}
+                              onChange={(e) => setJxEmlSqlPassword(e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <Button
                       type="submit"
@@ -4055,6 +4279,13 @@ function GestorSecretariaJudicialContent() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-gray-500">Por defecto: Primera instancia. Luego se crean cuadernos (principal, medidas cautelares, etc.).</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Radicado CUI (opcional)</Label>
+              <Input name="radicado" placeholder="23 dígitos sin guiones, ej. proceso ya radicado en línea" autoComplete="off" />
+              <p className="text-xs text-gray-500">
+                Si lo deja vacío, JudicialSys asigna el siguiente consecutivo del juzgado. Si indica un CUI, debe coincidir con el sufijo de instancia del radicado (…00 primera, …01 segunda).
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">

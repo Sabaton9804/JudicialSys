@@ -1,0 +1,19 @@
+# SQL Server local solo para PRUEBAS (no es la base real del juzgado).
+# Uso: docker compose -f docker-compose.justicia-xxi-local.yml up -d
+# Luego: npm run justicia-xxi:local:init
+
+services:
+  sql-justicia-local:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: judicialsys-justicia-xxi-local
+    environment:
+      ACCEPT_EULA: "Y"
+      # Debe coincidir con LOCAL_SA_PASSWORD en scripts/justicia-xxi-local/init-db.ts
+      MSSQL_SA_PASSWORD: "LocalDev9!Judicial"
+    ports:
+      - "14333:1433"
+    volumes:
+      - judicialsys_sql_justicia_local:/var/opt/mssql
+
+volumes:
+  judicialsys_sql_justicia_local:

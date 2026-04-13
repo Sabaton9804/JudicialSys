@@ -1,0 +1,31 @@
+Justicia XXI — SQL de PRUEBA en su PC (Docker)
+==============================================
+
+Esto NO sustituye la base real del juzgado. Sirve para comprobar que JudicialSys
+puede insertar en tablas parecidas a T103/T110 cuando todo corre en su máquina.
+
+Requisitos: Docker Desktop para Windows (https://www.docker.com/products/docker-desktop/)
+instalado y en ejecución. Si al correr «npm run justicia-xxi:local:up» dice que no
+reconoce «docker», instale Docker y reinicie la terminal.
+
+0) Abra Docker Desktop y espere a que quede en ejecucion (icono estable).
+
+1) Levantar SQL Server en el puerto 14333:
+   npm run justicia-xxi:local:up
+   (Si no tiene "docker compose", el script usa "docker run" automaticamente.)
+
+2) Esperar unos 20-30 s la primera vez (descarga la imagen). Luego crear tablas:
+   npm run justicia-xxi:local:init
+
+3) En JudicialSys → expediente → «Registrar en Justicia XXI»:
+   - Equipo servidor: 127.0.0.1
+   - Puerto: 14333
+   - Base: consejo
+   - Usuario: sa
+   - Contraseña: la misma que en docker-compose.justicia-xxi-local.yml
+     (por defecto LocalDev9!Judicial — cámbiela en el yml y en init-db.ts si desea)
+
+4) Apagar el contenedor:
+   npm run justicia-xxi:local:down
+
+Contraseña SA: debe cumplir reglas de SQL Server (mayúsculas, números, símbolo).

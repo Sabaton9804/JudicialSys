@@ -67,8 +67,9 @@ Es viable, pero es un **proyecto aparte**: adaptar el build (p. ej. [@opennextjs
 Pasos generales (referencia, no sustituyen la migración):
 
 1. Conectar el repo en **Cloudflare Dashboard → Workers & Pages → Create → Connect to Git**.
-2. Configurar **build** según la guía del adaptador OpenNext que elijan.
-3. Variables de entorno en el panel de Cloudflare (`DATABASE_URL`, claves S3, etc.).
+2. **Instalación de dependencias:** que el proyecto use **npm** con `package-lock.json` en la raíz. No versionar `bun.lock` desactualizado: Cloudflare detecta Bun y ejecuta `bun install --frozen-lockfile`, que falla si el lock no coincide con `package.json`.
+3. **Comando de build:** `npm run build:cloudflare` (genera `.open-next/`; no basta con `npm run build`).
+4. **Variables de entorno en el panel** (`DATABASE_URL`, claves S3, etc.) y, en **Variables de entorno del build**, `PUPPETEER_SKIP_DOWNLOAD=1` para no descargar Chromium en CI (ahorra cientos de MB y tiempo; en Workers el PDF vía Puppeteer no aplica igual que en Node local).
 
 ---
 

@@ -1,0 +1,62 @@
+Puente Justicia XXI (SQL Server desde su PC)
+=============================================
+
+Para qué sirve
+--------------
+Opcional: la app puede radicar con usuario/clave SQL del SIJC directamente desde Next (sin este script).
+Use el puente si despliega Next donde no llega al SQL, o si prefiere aislar la conexión en su PC.
+Ejecuta la misma radicación que la API /api/justicia-xxi/radicar.
+
+Requisitos
+----------
+- Node.js oficial (https://nodejs.org), NO Bun para el puente.
+- Misma carpeta del proyecto y el mismo .env / .env.local que usa «npm run dev»:
+  - DATABASE_URL (Prisma debe ver el mismo expediente que la app web)
+  - Opcional: JUSTICIA_XXI_SQL_* si no rellena todo en el formulario
+- Con usuario/clave SQL (caso habitual) no hace falta msnodesqlv8.
+- Solo si usa «cuenta de Windows» / Trusted_Connection: npm install msnodesqlv8 y, si falla la compilación,
+  «Desktop development with C++» en Visual Studio Build Tools y npm rebuild msnodesqlv8
+
+Paso 1 — Secreto (opcional si no toca .env)
+-------------------------------------------
+Al arrancar el puente, si no hay JUSTICIA_XXI_BRIDGE_SECRET, se crea el archivo
+`.judicialsys-bridge-secret` en la raíz del repo (ignorado por git). La app en
+modo desarrollo lee el mismo archivo y usa por defecto http://127.0.0.1:3847.
+
+Si prefiere variable explícita, en .env o .env.local:
+
+  JUSTICIA_XXI_BRIDGE_SECRET=ponga_aqui_una_cadena_larga_aleatoria
+
+Paso 2 — Arrancar el puente (en la PC que llega al SQL 172.16.x.x)
+-------------------------------------------------------------------
+  npm run justicia-xxi:bridge
+
+Compruebe en el navegador: http://127.0.0.1:3847/health
+Si no carga, el puente no está en marcha (o otro programa usa el puerto).
+
+Por defecto escucha en 127.0.0.1:3847. Para otro puerto:
+  JUSTICIA_XXI_BRIDGE_PORT=3999
+
+Paso 3 — App Next.js (desarrollo)
+---------------------------------
+Con NODE_ENV=development no suele hacer falta .env: la app usa http://127.0.0.1:3847
+y lee `.judicialsys-bridge-secret` (mismo que crea el puente).
+
+Para no usar el puente: JUSTICIA_XXI_BRIDGE_DISABLED=1
+
+En producción defina JUSTICIA_XXI_BRIDGE_URL y JUSTICIA_XXI_BRIDGE_SECRET (o despliegue
+el archivo de secreto de forma segura; no lo suba a git).
+
+Reinicie «npm run dev» tras arrancar el puente. Al registrar en Justicia XXI, la API llamará al puente.
+
+Si dice «fetch failed» o «conexión rechazada»
+---------------------------------------------
+- El puente debe estar en marcha *antes* de pulsar Registrar (ventana con el mensaje del puerto).
+- Si «npm run dev» corre dentro de WSL pero el puente en Windows, 127.0.0.1 no sirve: en .env use
+  JUSTICIA_XXI_BRIDGE_URL=http://SU_IPV4_DE_WINDOWS:3847 (véala con ipconfig).
+- Si usa proxy corporativo: NO_PROXY=127.0.0.1,localhost en el entorno de Next.js.
+
+Desde otra máquina / PaaS
+-------------------------
+Exponga el puerto con un túnel (Cloudflare Tunnel, ngrok, etc.) hacia 127.0.0.1:3847 y ponga
+esa URL https en JUSTICIA_XXI_BRIDGE_URL. No abra el puerto a internet sin HTTPS y firewall.

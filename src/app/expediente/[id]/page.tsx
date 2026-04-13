@@ -155,6 +155,21 @@ export default function ExpedientePage() {
   const [sgdeBatchRuta, setSgdeBatchRuta] = useState('01PrimeraInstancia/C01')
   /** Tras crear expediente, subir PDF/DOCX locales al SGDE con tipo documental inferido por IA. */
   const [sgdeSubirArchivosAlCrear, setSgdeSubirArchivosAlCrear] = useState(true)
+  const [justiciaXxiRadicando, setJusticiaXxiRadicando] = useState(false)
+  const [jxSqlServer, setJxSqlServer] = useState('')
+  const [jxSqlPort, setJxSqlPort] = useState('1433')
+  const [jxSqlDatabase, setJxSqlDatabase] = useState('consejo')
+  /** True si .env del servidor ya trae servidor + (Windows auth o usuario SQL). */
+  const [jxSqlHintsEnvListo, setJxSqlHintsEnvListo] = useState(false)
+  /** True si JUSTICIA_XXI_SQL_SERVER está en .env (aunque el formulario muestre el campo vacío). */
+  const [jxSqlServidorEnEnv, setJxSqlServidorEnEnv] = useState(false)
+  const [jxSqlPuenteLocalActivo, setJxSqlPuenteLocalActivo] = useState(false)
+  /** True si el proceso del puente respondió a /health (no solo que haya .env/secreto). */
+  const [jxSqlPuenteEscuchando, setJxSqlPuenteEscuchando] = useState(false)
+  const jxSqlHintsYaAplicados = useRef(false)
+  const [jxSqlUser, setJxSqlUser] = useState('')
+  const [jxSqlPassword, setJxSqlPassword] = useState('')
+  const [jxSqlWindowsAuth, setJxSqlWindowsAuth] = useState(false)
   const [sgdeBatchLoading, setSgdeBatchLoading] = useState(false)
   const [sgdeCrearExpedienteLoading, setSgdeCrearExpedienteLoading] = useState(false)
   /** Último resultado de «Crear expediente en SGDE» (persistente hasta cerrar o nueva acción). */
@@ -311,6 +326,51 @@ export default function ExpedientePage() {
   useEffect(() => {
     sgdeAutoFetchHecho.current = false
   }, [id])
+
+  /** Rellena servidor/puerto/base y «cuenta Windows» desde .env del servidor (equivalente a no repetir el DSN a mano). */
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await apiFetch('/api/justicia-xxi/sql-hints', {}, simulatedUser?.id)
+        if (!res.ok || cancelled) return
+        const data = await parseJsonResponse<{
+          success?: boolean
+          data?: {
+            sqlServer?: string
+            sqlPort?: string
+            sqlDatabase?: string
+            suggestWindowsAuth?: boolean
+            envListo?: boolean
+            servidorEnEnv?: boolean
+            puenteLocalActivo?: boolean
+            puenteEscuchando?: boolean
+          }
+        }>(res)
+        const d = data?.data
+        if (!d || cancelled) return
+        setJxSqlPuenteLocalActivo(Boolean(d.puenteLocalActivo))
+        setJxSqlPuenteEscuchando(Boolean(d.puenteEscuchando))
+        setJxSqlHintsEnvListo(Boolean(d.envListo))
+        setJxSqlServidorEnEnv(Boolean(d.servidorEnEnv))
+        if (jxSqlHintsYaAplicados.current) return
+        jxSqlHintsYaAplicados.current = true
+        if (d.sqlServer?.trim()) setJxSqlServer(d.sqlServer.trim())
+        setJxSqlPort(d.sqlPort?.trim() || '1433')
+        if (d.sqlDatabase?.trim()) setJxSqlDatabase(d.sqlDatabase.trim())
+        if (d.suggestWindowsAuth) {
+          setJxSqlWindowsAuth(true)
+          setJxSqlUser('')
+          setJxSqlPassword('')
+        }
+      } catch {
+        /* sin .env o sin sesión: el formulario queda manual */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [simulatedUser?.id])
 
   const fetchProceso = useCallback(async () => {
     if (!id) return
@@ -1787,6 +1847,235 @@ export default function ExpedientePage() {
                   </p>
                 </div>
               </details>
+            </div>
+            <div className="rounded-lg border border-violet-200 bg-violet-50/90 px-4 py-3 text-sm text-slate-800 space-y-3">
+              <p className="font-semibold text-violet-950">Registrar en Justicia XXI</p>
+              <p className="text-xs text-slate-700 leading-snug">
+                <strong>Recomendado (SIJC):</strong> usuario y contraseña SQL del sistema judicial (p. ej. el que muestra el portal), IP del servidor SQL, puerto 1433 y base <code className="text-[10px]">consejo</code>.{' '}
+                <strong>Pasos:</strong> 1) IP (la misma que en ODBC o la que le dé tecnología). 2) Usuario y clave SQL — <em>sin</em> marcar «cuenta de Windows». 3) Pulse Registrar. Solo si sistemas le dijo explícitamente Trusted_Connection/Windows, marque la casilla y omita usuario.
+              </p>
+              {jxSqlPuenteLocalActivo && !jxSqlPuenteEscuchando ? (
+                <p className="text-[11px] text-amber-950 bg-amber-50 rounded px-2 py-1 border border-amber-300">
+                  <strong>Puente configurado pero no responde</strong> en <code className="text-[10px]">127.0.0.1:3847</code>.
+                  En consola, carpeta del proyecto: <code className="text-[10px]">npm run dev</code> (sube puente + web; deje esa ventana abierta). Luego{' '}
+                  <code className="text-[10px]">http://127.0.0.1:3847/health</code> y recargue esta página.
+                </p>
+              ) : null}
+              {jxSqlPuenteLocalActivo && jxSqlPuenteEscuchando ? (
+                <p className="text-[11px] text-sky-900 bg-sky-50 rounded px-2 py-1 border border-sky-200">
+                  <strong>Puente en marcha:</strong> la conexión a SQL la abre el proceso en su PC.{' '}
+                  <strong>Sigue haciendo falta</strong> indicar IP, puerto y base (o en <code className="text-[10px]">.env</code>).
+                </p>
+              ) : null}
+              {jxSqlHintsEnvListo ? (
+                <p className="text-[11px] text-emerald-800 bg-emerald-50 rounded px-2 py-1 border border-emerald-200">
+                  Los datos ya vienen del servidor: revise y pulse Registrar.
+                </p>
+              ) : (
+                <p className="text-[11px] text-violet-800/90">
+                  Opcional: quien instaló el programa puede guardar la IP en el <code className="text-[10px]">.env</code> (<code className="text-[10px]">JUSTICIA_XXI_SQL_SERVER</code>) para no escribirla cada vez.
+                </p>
+              )}
+              <details className="text-[11px] text-slate-600 rounded border border-violet-100 bg-white/60 px-2 py-1.5">
+                <summary className="cursor-pointer font-medium text-violet-900 select-none">
+                  ¿Por qué falla aunque el portal del juzgado sí abre? (ayuda técnica)
+                </summary>
+                <div className="mt-2 space-y-2 pl-1 border-l-2 border-violet-100">
+                  <p>
+                    JudicialSys no usa el DSN de Windows; usa los mismos <em>datos</em> (IP, puerto, base). La conexión la hace un programa en red (Next.js o, si usa puente, el script del puente en su PC), no “solo el navegador”.
+                  </p>
+                  <p>
+                    Con <strong>usuario y clave del SIJC</strong> (autenticación SQL) suele bastar: mismo esquema que el portal, sin integrada de Windows ni <code className="text-[10px]">msnodesqlv8</code>. Si ODBC es solo Windows, pida un login SQL o use el puente con cuenta Windows avanzada.
+                  </p>
+                </div>
+              </details>
+              <label className="flex items-start gap-2 text-xs text-violet-950 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={jxSqlWindowsAuth}
+                  onChange={(e) => {
+                    const on = e.target.checked
+                    setJxSqlWindowsAuth(on)
+                    if (on) {
+                      setJxSqlUser('')
+                      setJxSqlPassword('')
+                    }
+                  }}
+                  className="mt-0.5"
+                />
+                <span>
+                  <strong>Solo si aplica:</strong> cuenta de Windows / Trusted_Connection (avanzado). La mayoría usa usuario y clave SQL del SIJC arriba, <em>sin</em> marcar esto.
+                </span>
+              </label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="space-y-1 sm:col-span-2 grid grid-cols-1 sm:grid-cols-[1fr_5.5rem] gap-2">
+                  <div className="space-y-1">
+                    <Label htmlFor="exp-jx-server" className="text-xs text-violet-950">
+                      IP del servidor SQL
+                    </Label>
+                    <Input
+                      id="exp-jx-server"
+                      value={jxSqlServer}
+                      onChange={(e) => setJxSqlServer(e.target.value)}
+                      placeholder="Escriba aquí la IP o el nombre (no use solo el texto gris de ejemplo)"
+                      autoComplete="off"
+                      className="text-sm bg-white"
+                    />
+                    {!jxSqlServer.trim() && !jxSqlServidorEnEnv ? (
+                      <p className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                        <strong>El campo de servidor está vacío.</strong> Lo gris dentro del cuadro es solo pista: haga
+                        clic, escriba la misma IP que en ODBC (DSN csjsql → Server) o pídala a sistemas. También puede
+                        definir <code className="text-[10px]">JUSTICIA_XXI_SQL_SERVER</code> en el <code className="text-[10px]">.env</code> del servidor Next.js.
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="exp-jx-port" className="text-xs text-violet-950">
+                      Puerto
+                    </Label>
+                    <Input
+                      id="exp-jx-port"
+                      value={jxSqlPort}
+                      onChange={(e) => setJxSqlPort(e.target.value)}
+                      placeholder="1433"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      className="text-sm bg-white"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="exp-jx-db" className="text-xs text-violet-950">
+                    Nombre de la base de datos
+                  </Label>
+                  <Input
+                    id="exp-jx-db"
+                    value={jxSqlDatabase}
+                    onChange={(e) => setJxSqlDatabase(e.target.value)}
+                    onBlur={() => setJxSqlDatabase((d) => (d.trim() ? d : 'consejo'))}
+                    placeholder="consejo"
+                    autoComplete="off"
+                    className="text-sm bg-white"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="exp-jx-user" className="text-xs text-violet-950">
+                    Usuario SQL (SIJC)
+                  </Label>
+                  <Input
+                    id="exp-jx-user"
+                    value={jxSqlUser}
+                    onChange={(e) => setJxSqlUser(e.target.value)}
+                    autoComplete="username"
+                    disabled={jxSqlWindowsAuth}
+                    className="text-sm bg-white"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="exp-jx-pass" className="text-xs text-violet-950">
+                    Contraseña SQL
+                  </Label>
+                  <Input
+                    id="exp-jx-pass"
+                    type="password"
+                    value={jxSqlPassword}
+                    onChange={(e) => setJxSqlPassword(e.target.value)}
+                    autoComplete="current-password"
+                    disabled={jxSqlWindowsAuth}
+                    className="text-sm bg-white"
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                {jxSqlWindowsAuth
+                  ? jxSqlPuenteLocalActivo && jxSqlPuenteEscuchando
+                    ? 'No se envían credenciales SQL. La identidad de Windows es la del proceso del puente en su PC (npm run justicia-xxi:bridge), no la del servidor Next.js.'
+                    : jxSqlPuenteLocalActivo && !jxSqlPuenteEscuchando
+                      ? 'Arranque el puente en otra ventana o «Registrar» fallará al contactar 127.0.0.1:3847.'
+                      : 'No se envían credenciales SQL; se usa la identidad de Windows del equipo donde corre el servidor Next.js.'
+                  : 'La contraseña no se guarda en JudicialSys después de usarla.'}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-violet-400 text-violet-900"
+                disabled={justiciaXxiRadicando || !id}
+                onClick={async () => {
+                  if (!jxSqlWindowsAuth && !jxSqlUser.trim()) {
+                    toast.error('Escriba el usuario SQL o active «cuenta de Windows»')
+                    return
+                  }
+                  if (!jxSqlWindowsAuth && jxSqlUser.trim() && !jxSqlPassword.trim()) {
+                    toast.error(
+                      'Con usuario SQL hace falta la contraseña que le dio sistemas. Si su conexión es solo Windows (como el DSN csjsql con Trusted_Connection), marque «cuenta de Windows» y deje usuario vacío.',
+                      { duration: 12000 }
+                    )
+                    return
+                  }
+                  if (!jxSqlServer.trim() && !jxSqlServidorEnEnv) {
+                    toast.error(
+                      'Falta el equipo servidor (IP o nombre). Ej.: 172.16.155.193 — la misma que en ODBC para csjsql. O defina JUSTICIA_XXI_SQL_SERVER en el .env donde corre Next.js.',
+                      { duration: 10000 }
+                    )
+                    return
+                  }
+                  setJusticiaXxiRadicando(true)
+                  if (jxSqlPuenteLocalActivo && jxSqlPuenteEscuchando) {
+                    toast.info(
+                      'Puente Justicia XXI: la operación puede tardar varios minutos (conexión e inserción en SQL). No cierre la ventana del puente ni pulse de nuevo el botón.',
+                      { duration: 10000 }
+                    )
+                  }
+                  try {
+                    const body: Record<string, string | boolean> = { procesoId: id }
+                    if (jxSqlServer.trim()) body.justiciaXxiSqlServer = jxSqlServer.trim()
+                    if (jxSqlPort.trim()) body.justiciaXxiSqlPort = jxSqlPort.trim()
+                    body.justiciaXxiSqlDatabase = jxSqlDatabase.trim() || 'consejo'
+                    if (jxSqlWindowsAuth) {
+                      body.justiciaXxiSqlWindowsAuth = true
+                    } else {
+                      body.justiciaXxiSqlUser = jxSqlUser.trim()
+                      if (jxSqlPassword.length > 0) body.justiciaXxiSqlPassword = jxSqlPassword
+                    }
+
+                    const res = await apiFetch(
+                      '/api/justicia-xxi/radicar',
+                      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+                      simulatedUser?.id
+                    )
+                    const data = await parseJsonResponse<{
+                      success?: boolean
+                      error?: string
+                      message?: string
+                      data?: { llave: string; yaExistia: boolean }
+                    }>(res)
+                    if (data?.success && data.data) {
+                      toast.success(
+                        data.data.yaExistia
+                          ? `Ese radicado ya estaba en Justicia XXI (${data.data.llave}).`
+                          : data.message || `Registrado en Justicia XXI (${data.data.llave}).`,
+                        { duration: 7000 }
+                      )
+                    } else {
+                      toast.error(data?.error || 'No se pudo registrar en Justicia XXI', { duration: 9000 })
+                    }
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : 'Error al llamar la API', { duration: 8000 })
+                  } finally {
+                    setJusticiaXxiRadicando(false)
+                  }
+                }}
+              >
+                {justiciaXxiRadicando ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Enviando a SQL…
+                  </>
+                ) : (
+                  <>Registrar en Justicia XXI</>
+                )}
+              </Button>
             </div>
             <div className="rounded-lg border border-emerald-200 bg-emerald-50/90 px-4 py-3 text-sm space-y-3">
               <p className="font-semibold text-emerald-950 flex items-center gap-2">
