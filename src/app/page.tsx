@@ -4951,8 +4951,3 @@ export default function GestorSecretariaJudicial() {
     </Suspense>
   )
 }
-
-// Label component
-function Label({ children, className, htmlFor }: { children: React.ReactNode; className?: string; htmlFor?: string }) {
-  return <label htmlFor={htmlFor} className={`text-sm font-medium text-gray-700 ${className}`}>{children}</label>
-}
