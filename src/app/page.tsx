@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -21,12 +22,17 @@ import {
   Send, Plus, RefreshCw, Wifi, WifiOff, Download, Eye, Upload,   FolderOpen, File, ListOrdered,
   ClipboardList, UserPlus, History, Archive, Briefcase, Play, CheckSquare, BarChart3,
   MessageSquare, PenTool, BookOpen, Scale, FileSignature, Shield, Pencil, MapPin, Trash2, ExternalLink,
-  LayoutTemplate, Stamp
+  LayoutTemplate, Stamp, Settings,
 } from 'lucide-react'
 import { useWebSocket } from '@/hooks/use-websocket'
 import { useUserStore } from '@/stores/user-store'
 import { apiFetch } from '@/lib/api-fetch'
 import { SHELL_SOLO_RADICACION_TUTELAS } from '@/config/judicialsys-shell'
+import {
+  borrarSgdeDelNavegador,
+  cargarSgdeDesdeNavegador,
+  guardarSgdeEnNavegador,
+} from '@/lib/sgde-browser-storage'
 
 // ==================== HELPERS ====================
 /** Parsea la respuesta como JSON. Si la API devuelve HTML (error 404/500), lanza un error conciso sin volcar HTML en consola. */
@@ -223,6 +229,9 @@ function GestorSecretariaJudicialContent() {
   const [jxEmlPuenteLocalActivo, setJxEmlPuenteLocalActivo] = useState(false)
   const [jxEmlPuenteEscuchando, setJxEmlPuenteEscuchando] = useState(false)
   const jxEmlHintsYaAplicados = useRef(false)
+  /** Formulario pestaña Configuración (shell reducido): credenciales SGDE en navegador. */
+  const [configSgdeUsuario, setConfigSgdeUsuario] = useState('')
+  const [configSgdePassword, setConfigSgdePassword] = useState('')
   const [preparandoOrdenDoc, setPreparandoOrdenDoc] = useState(false)
   const [descargandoPaqueteEml, setDescargandoPaqueteEml] = useState(false)
   const [resultadoPrepararOrden, setResultadoPrepararOrden] = useState<{
@@ -253,6 +262,11 @@ function GestorSecretariaJudicialContent() {
   // Search
   const [searchQuery, setSearchQuery] = useState('')
   const { user: simulatedUser, setUser: setSimulatedUser } = useUserStore()
+
+  useEffect(() => {
+    if (!SHELL_SOLO_RADICACION_TUTELAS) return
+    setSimulatedUser(null)
+  }, [setSimulatedUser])
 
   useEffect(() => {
     let cancelled = false
@@ -534,7 +548,7 @@ function GestorSecretariaJudicialContent() {
   useEffect(() => {
     if (SHELL_SOLO_RADICACION_TUTELAS) {
       if (activeArea !== 'SECRETARIA') setActiveArea('SECRETARIA')
-      if (!['radicacion', 'tutelas'].includes(activeTab)) setActiveTab('radicacion')
+      if (!['radicacion', 'tutelas', 'configuracion'].includes(activeTab)) setActiveTab('radicacion')
       return
     }
     if (
@@ -590,8 +604,9 @@ function GestorSecretariaJudicialContent() {
     })()
   }, [searchParams, simulatedUser?.id])
 
-  // Usuario simulado por defecto (primer usuario con juzgado)
+  // Usuario simulado por defecto (primer usuario con juzgado) — no en shell solo radicación/tutelas (prueba real sin semilla automática)
   useEffect(() => {
+    if (SHELL_SOLO_RADICACION_TUTELAS) return
     if (!simulatedUser && usuarios.length > 0) {
       const defaultUser = usuarios.find(u => u.juzgadoId) || usuarios[0]
       setSimulatedUser({
@@ -604,6 +619,18 @@ function GestorSecretariaJudicialContent() {
       })
     }
   }, [usuarios, simulatedUser, setSimulatedUser])
+
+  useEffect(() => {
+    if (!SHELL_SOLO_RADICACION_TUTELAS || activeTab !== 'configuracion') return
+    const s = cargarSgdeDesdeNavegador()
+    if (s) {
+      setConfigSgdeUsuario(s.usuario)
+      setConfigSgdePassword(s.password)
+    } else {
+      setConfigSgdeUsuario('')
+      setConfigSgdePassword('')
+    }
+  }, [activeTab])
 
   // ==================== HANDLERS ====================
   const handleFirmarProvidencia = async (providenciaId: string) => {
@@ -1523,6 +1550,7 @@ function GestorSecretariaJudicialContent() {
                 {[
                   { id: 'tutelas', icon: Scale, label: 'Tutelas', badge: dashboardData?.resumen?.procesos?.tutelas },
                   { id: 'radicacion', icon: Stamp, label: 'Radicación' },
+                  { id: 'configuracion', icon: Settings, label: 'Configuración' },
                 ].map((item) => (
                   <li key={item.id}>
                     <button
@@ -1536,9 +1564,13 @@ function GestorSecretariaJudicialContent() {
                             ? activeTab === 'radicacion'
                               ? 'bg-teal-50 text-teal-800 font-semibold border border-teal-200'
                               : 'text-teal-700 hover:bg-teal-50 font-medium'
-                            : activeTab === item.id
-                              ? 'bg-blue-50 text-blue-700 font-medium'
-                              : 'text-gray-600 hover:bg-gray-100'
+                            : item.id === 'configuracion'
+                              ? activeTab === 'configuracion'
+                                ? 'bg-slate-100 text-slate-900 font-semibold border border-slate-200'
+                                : 'text-slate-700 hover:bg-slate-50 font-medium'
+                              : activeTab === item.id
+                                ? 'bg-blue-50 text-blue-700 font-medium'
+                                : 'text-gray-600 hover:bg-gray-100'
                       }`}
                     >
                       <item.icon
@@ -1547,7 +1579,9 @@ function GestorSecretariaJudicialContent() {
                             ? 'w-5 h-5 text-violet-600'
                             : item.id === 'radicacion'
                               ? 'w-5 h-5 text-teal-600'
-                              : 'w-5 h-5'
+                              : item.id === 'configuracion'
+                                ? 'w-5 h-5 text-slate-600'
+                                : 'w-5 h-5'
                         }
                       />
                       {sidebarOpen && (
@@ -1796,6 +1830,7 @@ function GestorSecretariaJudicialContent() {
                   {activeTab === 'planner' && 'Mi agenda'}
                   {activeTab === 'tutelas' && 'Acciones de Tutela'}
                   {activeTab === 'radicacion' && 'Radicación'}
+                  {activeTab === 'configuracion' && 'Configuración'}
                   {activeTab === 'tareas' && 'Tareas Internas'}
                   {activeTab === 'procesos' && 'Procesos Judiciales'}
                   {activeTab === 'usuarios' && 'Gestión de Usuarios'}
@@ -1804,7 +1839,7 @@ function GestorSecretariaJudicialContent() {
               </div>
               <p className="text-sm text-gray-500 mt-1">
                 {SHELL_SOLO_RADICACION_TUTELAS
-                  ? 'Interfaz reducida: crear expedientes, tutelas en línea y listado de tutelas.'
+                  ? 'Interfaz reducida: radicación, tutelas y credenciales SGDE en Configuración. Sin usuario JudicialSys automático.'
                   : activeArea === 'ADMIN'
                     ? 'Super usuario: asignar cargos y juzgados'
                     : 'Juzgado Primero Civil del Circuito de Bogotá D.C.'}
@@ -1848,44 +1883,48 @@ function GestorSecretariaJudicialContent() {
                   </span>
                 )}
               </Button>
-              <Select
-                value={simulatedUser?.id || ''}
-                onValueChange={(id) => {
-                  if (id === '__empty__') return
-                  const u = usuarios.find(x => x.id === id)
-                  if (u) setSimulatedUser({ id: u.id, nombre: u.nombre, email: u.email, rol: u.rol, area: u.area, juzgadoId: u.juzgadoId })
-                  else setSimulatedUser(null)
-                }}
-              >
-                <SelectTrigger className="w-[220px]">
-                  <SelectValue placeholder="Simular usuario..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {usuarios.length === 0 ? (
-                    <SelectItem value="__empty__" disabled>
-                      No hay usuarios. Ejecute: npx prisma db seed
-                    </SelectItem>
-                  ) : (
-                    usuarios.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.nombre} ({ROLES_LABEL[u.rol] || u.rol})
-                      </SelectItem>
-                    ))
+              {!SHELL_SOLO_RADICACION_TUTELAS && (
+                <>
+                  <Select
+                    value={simulatedUser?.id || ''}
+                    onValueChange={(id) => {
+                      if (id === '__empty__') return
+                      const u = usuarios.find(x => x.id === id)
+                      if (u) setSimulatedUser({ id: u.id, nombre: u.nombre, email: u.email, rol: u.rol, area: u.area, juzgadoId: u.juzgadoId })
+                      else setSimulatedUser(null)
+                    }}
+                  >
+                    <SelectTrigger className="w-[220px]">
+                      <SelectValue placeholder="Simular usuario..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {usuarios.length === 0 ? (
+                        <SelectItem value="__empty__" disabled>
+                          No hay usuarios. Ejecute: npx prisma db seed
+                        </SelectItem>
+                      ) : (
+                        usuarios.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.nombre} ({ROLES_LABEL[u.rol] || u.rol})
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                  {simulatedUser && (
+                    <div className="flex items-center gap-2">
+                      <Avatar className="w-8 h-8">
+                        <AvatarFallback className={activeArea === 'DESPACHO' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}>
+                          {simulatedUser.nombre.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="text-sm">
+                        <p className="font-medium text-gray-900">{simulatedUser.nombre}</p>
+                        <p className="text-xs text-gray-500">{ROLES_LABEL[simulatedUser.rol] || simulatedUser.rol}</p>
+                      </div>
+                    </div>
                   )}
-                </SelectContent>
-              </Select>
-              {simulatedUser && (
-                <div className="flex items-center gap-2">
-                  <Avatar className="w-8 h-8">
-                    <AvatarFallback className={activeArea === 'DESPACHO' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}>
-                      {simulatedUser.nombre.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="text-sm">
-                    <p className="font-medium text-gray-900">{simulatedUser.nombre}</p>
-                    <p className="text-xs text-gray-500">{ROLES_LABEL[simulatedUser.rol] || simulatedUser.rol}</p>
-                  </div>
-                </div>
+                </>
               )}
             </div>
           </div>
@@ -3080,6 +3119,71 @@ function GestorSecretariaJudicialContent() {
                       {importandoEmlTutela ? 'Importando correo…' : 'Radicar desde este .eml'}
                     </Button>
                   </form>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {activeTab === 'configuracion' && SHELL_SOLO_RADICACION_TUTELAS && (
+            <div className="space-y-6 max-w-lg">
+              <Card className="border-slate-200 shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-slate-900">Usuario SGDE</CardTitle>
+                  <CardDescription>
+                    Mismo almacén que usa el expediente: las peticiones a SGDE (crear expediente, subir documentos, consultas) tomarán este usuario y contraseña si no los cambia en la pantalla del expediente. Solo se guardan en este navegador (localStorage), no en el servidor ni en el repositorio.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="cfg-sgde-usuario">Usuario SGDE</Label>
+                    <Input
+                      id="cfg-sgde-usuario"
+                      autoComplete="username"
+                      value={configSgdeUsuario}
+                      onChange={(e) => setConfigSgdeUsuario(e.target.value)}
+                      placeholder="Usuario de la Rama / SGDE"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="cfg-sgde-password">Contraseña</Label>
+                    <Input
+                      id="cfg-sgde-password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={configSgdePassword}
+                      onChange={(e) => setConfigSgdePassword(e.target.value)}
+                      placeholder="Contraseña"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button
+                      type="button"
+                      className="bg-slate-800 hover:bg-slate-900"
+                      onClick={() => {
+                        const u = configSgdeUsuario.trim()
+                        if (!u || !configSgdePassword) {
+                          toast.error('Indique usuario y contraseña SGDE')
+                          return
+                        }
+                        guardarSgdeEnNavegador(u, configSgdePassword)
+                        toast.success('Credenciales SGDE guardadas en este navegador')
+                      }}
+                    >
+                      Guardar
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        borrarSgdeDelNavegador()
+                        setConfigSgdeUsuario('')
+                        setConfigSgdePassword('')
+                        toast.message('Credenciales SGDE borradas de este navegador')
+                      }}
+                    >
+                      Borrar guardadas
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             </div>
