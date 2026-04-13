@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -240,6 +241,9 @@ function GestorSecretariaJudicialContent() {
     const s = cargarSgdeDesdeNavegador()
     setHeaderSgdeUsuario(s?.usuario?.trim() ?? '')
   }, [])
+
+  /** Cloudflare Workers/Pages: sin SQLite persistente ni mailparser real → radicar .eml no es viable aquí. */
+  const [emlRadicacionDeshabilitadaPorHost, setEmlRadicacionDeshabilitadaPorHost] = useState(false)
   const [preparandoOrdenDoc, setPreparandoOrdenDoc] = useState(false)
   const [descargandoPaqueteEml, setDescargandoPaqueteEml] = useState(false)
   const [resultadoPrepararOrden, setResultadoPrepararOrden] = useState<{
@@ -653,6 +657,14 @@ function GestorSecretariaJudicialContent() {
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
   }, [refreshHeaderSgdeUsuario])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const h = window.location.hostname
+    setEmlRadicacionDeshabilitadaPorHost(
+      h.endsWith('.workers.dev') || h.endsWith('.pages.dev')
+    )
+  }, [])
 
   // ==================== HANDLERS ====================
   const handleFirmarProvidencia = async (providenciaId: string) => {
@@ -1138,6 +1150,13 @@ function GestorSecretariaJudicialContent() {
 
   const handleCrearProcesoDesdeEml = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    if (emlRadicacionDeshabilitadaPorHost) {
+      toast.error(
+        'En Cloudflare Workers/Pages no puede radicarse desde .eml. Use la app con npm run dev en su PC o un servidor Node con base de datos.',
+        { duration: 12000 }
+      )
+      return
+    }
     const form = e.currentTarget
     const fileInput = form.querySelector('input[type="file"]') as HTMLInputElement
     const file = fileInput?.files?.[0]
@@ -1173,7 +1192,9 @@ function GestorSecretariaJudicialContent() {
         }
       }
       const res = await apiFetch('/api/tutela/crear-desde-eml', { method: 'POST', body: fd }, simulatedUser?.id)
-      const data = await parseJsonResponse<{
+      const rawBody = await res.text()
+      const ct = res.headers.get('content-type') ?? ''
+      type CrearDesdeEmlJson = {
         success?: boolean
         data?: {
           proceso: { id: string; radicado: string }
@@ -1190,7 +1211,23 @@ function GestorSecretariaJudicialContent() {
           }
         }
         error?: string
-      }>(res)
+        entornoIncompatible?: boolean
+      }
+      let data: CrearDesdeEmlJson | null = null
+      if (rawBody && ct.includes('application/json')) {
+        try {
+          data = JSON.parse(rawBody) as CrearDesdeEmlJson
+        } catch {
+          data = null
+        }
+      }
+      if (!data) {
+        toast.error(
+          `No se pudo radicar (${res.status}). La API no devolvió JSON (fallo típico en Cloudflare Workers: ahí no hay base SQLite como en su PC ni el analizador de correo completo). Use esta función con **npm run dev** en su equipo o despliegue la app en un **servidor Node** (Docker, VPS, Railway, etc.).`,
+          { duration: 16000 }
+        )
+        return
+      }
       if (data?.success && data.data) {
         const fus = data.data.fusionadoEnExpedienteExistente
         const jx = data.data.justiciaXxi
@@ -1220,10 +1257,18 @@ function GestorSecretariaJudicialContent() {
         fetchDashboard()
         if (data.data.proceso?.id) openExpediente(data.data.proceso.id)
       } else {
-        toast.error((data as { error?: string })?.error || 'Error al crear proceso desde el correo', { duration: 6000 })
+        const d = data as CrearDesdeEmlJson
+        const errMsg = d?.error || 'Error al crear proceso desde el correo'
+        toast.error(errMsg, { duration: d?.entornoIncompatible ? 16000 : 8000 })
       }
-    } catch {
-      toast.error('Error al crear proceso desde el correo')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : ''
+      toast.error(
+        msg && msg.length < 400
+          ? `${msg} Si usa el sitio en Cloudflare Workers, radique .eml solo con Node local o servidor Node.`
+          : 'Error de red o respuesta inválida. Si usa Cloudflare Workers, la radicación .eml requiere Node con base de datos.',
+        { duration: 12000 }
+      )
     } finally {
       setImportandoEmlTutela(false)
     }
@@ -2991,6 +3036,28 @@ function GestorSecretariaJudicialContent() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-5 pt-0">
+                  {SHELL_SOLO_RADICACION_TUTELAS && emlRadicacionDeshabilitadaPorHost && (
+                    <Alert className="border-amber-400 bg-amber-50 text-amber-950 shadow-sm [&>svg]:text-amber-700">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      <AlertTitle>Radicación desde .eml no disponible en esta URL</AlertTitle>
+                      <AlertDescription className="text-amber-900/95">
+                        <p>
+                          Este sitio está en <strong>Cloudflare Workers o Pages</strong>: allí no funciona una base{' '}
+                          <strong>SQLite en archivo</strong> como en su equipo, y el build del Worker no incluye el analizador completo de correo (
+                          <strong>mailparser</strong>) que hace falta para leer el .eml.
+                        </p>
+                        <p className="mt-2">
+                          Para radicar tutelas (o civil) desde Outlook, ejecute JudicialSys en su red con{' '}
+                          <code className="rounded bg-white/90 px-1 py-0.5 text-xs">npm run dev</code> o despliegue el build{' '}
+                          <strong>Node standalone</strong> (Docker, VPS, Railway, etc.) con <code className="text-xs">DATABASE_URL</code> válida.
+                        </p>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  <fieldset
+                    disabled={Boolean(SHELL_SOLO_RADICACION_TUTELAS && emlRadicacionDeshabilitadaPorHost)}
+                    className="min-w-0 flex flex-col gap-5 border-0 p-0 m-0 disabled:pointer-events-none disabled:opacity-50"
+                  >
                   <form
                     onSubmit={handleCrearProcesoDesdeEml}
                     className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-end gap-3 rounded-xl border-2 border-teal-400/45 bg-white p-4 shadow-sm"
@@ -3152,6 +3219,7 @@ function GestorSecretariaJudicialContent() {
                       {importandoEmlTutela ? 'Importando correo…' : 'Radicar desde este .eml'}
                     </Button>
                   </form>
+                  </fieldset>
                 </CardContent>
               </Card>
             </div>
