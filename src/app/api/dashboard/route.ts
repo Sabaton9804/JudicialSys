@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { jsonApiErrorConEntorno } from '@/lib/deploy-compat'
 import { getUserFromHeader, juzgadoWhere, procesoJuzgadoWhere } from '@/lib/auth-utils'
 
 // GET - Estadísticas del dashboard separadas por área
@@ -356,10 +357,7 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     console.error('Error al obtener dashboard:', error)
-    const msg = error instanceof Error ? error.message : 'Error al obtener estadísticas'
-    return NextResponse.json(
-      { success: false, error: msg },
-      { status: 500 }
-    )
+    const { body, status } = jsonApiErrorConEntorno(error, 'Error al obtener estadísticas')
+    return NextResponse.json(body, { status })
   }
 }

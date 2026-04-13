@@ -25,7 +25,18 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const [notificaciones, setNotificaciones] = useState<Notificacion[]>([])
 
   useEffect(() => {
-    // Crear conexión con el servidor WebSocket
+    if (typeof window === 'undefined') return
+
+    const host = window.location.hostname
+    const socketNoSoportadoEnHost =
+      host.endsWith('.workers.dev') ||
+      host.endsWith('.pages.dev') ||
+      process.env.NEXT_PUBLIC_DISABLE_WEBSOCKET === '1'
+    if (socketNoSoportadoEnHost) {
+      return
+    }
+
+    // Crear conexión con el servidor WebSocket (servidor Node local / mismo origen con WS)
     const socketInstance: Socket = io('/?XTransformPort=3003', {
       transports: ['websocket', 'polling'],
       reconnection: true,

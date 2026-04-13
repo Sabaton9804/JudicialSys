@@ -14,9 +14,24 @@ export const runtime = 'nodejs'
 export async function GET(request: NextRequest) {
   try {
     const user = await getUserFromHeader(request)
-    /** En desarrollo suele abrirse el expediente sin «simular usuario»; las pistas no llevan claves SQL. */
+    /**
+     * Sin usuario simulado en producción (p. ej. demo en Cloudflare): no devolvemos 401
+     * para no inundar la consola; las pistas siguen sin incluir secretos.
+     */
     if (!user && process.env.NODE_ENV === 'production') {
-      return NextResponse.json({ success: false, error: 'No autorizado' }, { status: 401 })
+      return NextResponse.json({
+        success: true,
+        data: {
+          sqlServer: '',
+          sqlPort: '1433',
+          sqlDatabase: 'consejo',
+          suggestWindowsAuth: false,
+          envListo: false,
+          servidorEnEnv: false,
+          puenteLocalActivo: false,
+          puenteEscuchando: false,
+        },
+      })
     }
 
     const sqlServer = process.env.JUSTICIA_XXI_SQL_SERVER?.trim() ?? ''

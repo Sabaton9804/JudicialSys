@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { jsonApiErrorConEntorno } from '@/lib/deploy-compat'
 import { RolUsuario, AreaJuzgado } from '@prisma/client'
 import { hashPassword } from '@/lib/password-hash'
 
@@ -35,10 +36,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, data: usuarios })
   } catch (error) {
     console.error('Error listando usuarios:', error)
-    return NextResponse.json(
-      { success: false, error: 'Error al listar usuarios' },
-      { status: 500 }
-    )
+    const { body, status } = jsonApiErrorConEntorno(error, 'Error al listar usuarios')
+    return NextResponse.json(body, { status })
   }
 }
 
