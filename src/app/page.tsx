@@ -211,8 +211,7 @@ function GestorSecretariaJudicialContent() {
   const [showIngresarDespacho, setShowIngresarDespacho] = useState(false)
   const [procesoParaIngresar, setProcesoParaIngresar] = useState<any>(null)
   const [showCrearExpediente, setShowCrearExpediente] = useState(false)
-  const [crearExpedienteTab, setCrearExpedienteTab] = useState<'reparto' | 'orden' | 'manual'>('reparto')
-  const [importandoReparto, setImportandoReparto] = useState(false)
+  const [crearExpedienteTab, setCrearExpedienteTab] = useState<'orden' | 'manual'>('orden')
   const [importandoEmlTutela, setImportandoEmlTutela] = useState(false)
   const [registrarJusticiaXxiTrasEml, setRegistrarJusticiaXxiTrasEml] = useState(false)
   const [justiciaXxiWindowsAuthEml, setJusticiaXxiWindowsAuthEml] = useState(false)
@@ -1088,44 +1087,6 @@ function GestorSecretariaJudicialContent() {
     }
   }
 
-  const handleImportarReparto = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const form = e.currentTarget
-    const fileInput = form.querySelector('input[type="file"]') as HTMLInputElement
-    const file = fileInput?.files?.[0]
-    if (!file) {
-      toast.error('Seleccione un archivo ZIP')
-      return
-    }
-    if (!file.name.toLowerCase().endsWith('.zip')) {
-      toast.error('El archivo debe ser un ZIP (.zip)')
-      return
-    }
-    setImportandoReparto(true)
-    try {
-      const fd = new FormData()
-      fd.append('file', file)
-      const res = await apiFetch('/api/reparto/import', { method: 'POST', body: fd }, simulatedUser?.id)
-      const data = await parseJsonResponse<{ success?: boolean; data?: { proceso: { id: string; radicado: string }; archivosSubidos: number; datosExtraidos: unknown }; error?: string }>(res)
-      if (data?.success && data.data) {
-        toast.success(`Proceso ${data.data.proceso.radicado} creado con ${data.data.archivosSubidos} archivo(s)`)
-                setShowCrearExpediente(false)
-        fileInput.value = ''
-        if (activeTab === 'tutelas') fetchTutelas()
-        else if (activeTab === 'procesos') fetchProcesosCiviles()
-        fetchDashboard()
-        if (data.data.proceso?.id) openExpediente(data.data.proceso.id)
-      } else {
-        const err = (data as any)?.error || 'Error al crear expediente'
-        toast.error(err, { duration: 6000 })
-      }
-    } catch (error) {
-      toast.error('Error al importar desde reparto')
-    } finally {
-      setImportandoReparto(false)
-    }
-  }
-
   const handleCrearProcesoDesdeEml = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const form = e.currentTarget
@@ -1858,7 +1819,7 @@ function GestorSecretariaJudicialContent() {
                   </a>
                 </Button>
               )}
-              <Button onClick={() => { setShowCrearExpediente(true); setCrearExpedienteTab('reparto'); }} variant="outline" size="sm" className="border-amber-500 text-amber-700 hover:bg-amber-50 shrink-0">
+              <Button onClick={() => { setShowCrearExpediente(true); setCrearExpedienteTab('orden'); }} variant="outline" size="sm" className="border-amber-500 text-amber-700 hover:bg-amber-50 shrink-0">
                 <Plus className="w-4 h-4 mr-2" />
                 Crear expediente
               </Button>
@@ -1940,9 +1901,9 @@ function GestorSecretariaJudicialContent() {
               <div className="flex items-center justify-between gap-3 py-2 px-3 rounded-lg bg-amber-50/80 border border-amber-200/60">
                 <div className="flex items-center gap-2">
                   <FolderOpen className="w-4 h-4 text-amber-600" />
-                  <span className="text-sm text-gray-700">Cargue el ZIP de reparto o ingrese los datos manualmente.</span>
+                  <span className="text-sm text-gray-700">Radique desde <strong>Radicación</strong> (.eml) o abra aquí para orden de documentos y datos manuales.</span>
                 </div>
-                <Button onClick={() => { setShowCrearExpediente(true); setCrearExpedienteTab('reparto'); }} size="sm" className="bg-amber-500 hover:bg-amber-600 shrink-0">
+                <Button onClick={() => { setShowCrearExpediente(true); setCrearExpedienteTab('orden'); }} size="sm" className="bg-amber-500 hover:bg-amber-600 shrink-0">
                   <Plus className="w-4 h-4 mr-1" />
                   Crear expediente
                 </Button>
@@ -2011,7 +1972,7 @@ function GestorSecretariaJudicialContent() {
                         </div>
                       </div>
                       <div className="flex gap-2">
-                        <Button onClick={() => { setShowCrearExpediente(true); setCrearExpedienteTab('reparto'); }} variant="outline" className="border-cyan-500 text-cyan-700 hover:bg-cyan-50">
+                        <Button onClick={() => { setShowCrearExpediente(true); setCrearExpedienteTab('orden'); }} variant="outline" className="border-cyan-500 text-cyan-700 hover:bg-cyan-50">
                           <FolderOpen className="w-4 h-4 mr-2" />
                           Crear expediente
                         </Button>
@@ -2952,7 +2913,7 @@ function GestorSecretariaJudicialContent() {
 
               <Card className="border-teal-300 bg-gradient-to-b from-teal-50/80 to-white shadow-md ring-1 ring-teal-200/70">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-lg text-teal-950">1. Importar .eml y crear expediente</CardTitle>
+                  <CardTitle className="text-lg text-teal-950">Importar .eml y crear expediente</CardTitle>
                   <CardDescription className="text-teal-950/85 text-sm">
                     Se arma el expediente con el correo y los archivos adjuntos. Al terminar se abre el expediente. Si marca la casilla de Justicia XXI, complete los datos que le entregue sistemas o secretaría.
                   </CardDescription>
@@ -3121,64 +3082,6 @@ function GestorSecretariaJudicialContent() {
                   </form>
                 </CardContent>
               </Card>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <Card className="border-slate-200">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base text-slate-900">2. Otras entradas al expediente</CardTitle>
-                    <CardDescription className="text-sm">
-                      Reparto con PDF sueltos, creación manual o solo orden de documentos sin tocar la base de datos.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-2 pt-0">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="border-cyan-600 text-cyan-900 justify-start"
-                      onClick={() => {
-                        setShowCrearExpediente(true)
-                        setCrearExpedienteTab('reparto')
-                      }}
-                    >
-                      <FolderOpen className="w-4 h-4 mr-2 shrink-0" />
-                      Crear expediente (reparto / manual / otros)
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="border-cyan-600 text-cyan-900 justify-start"
-                      onClick={() => {
-                        setShowCrearExpediente(true)
-                        setCrearExpedienteTab('orden')
-                      }}
-                    >
-                      <ListOrdered className="w-4 h-4 mr-2 shrink-0" />
-                      Orden documentos y paquete ZIP desde .eml
-                    </Button>
-                  </CardContent>
-                </Card>
-                <Card className="border-cyan-200 bg-cyan-50/40">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base text-cyan-950">Ejemplo y referencia</CardTitle>
-                    <CardDescription className="text-cyan-950/85 text-sm">
-                      Expediente de prueba <strong>2026-300</strong> tras{' '}
-                      <code className="text-[11px] bg-white px-1 rounded">npx tsx prisma/seed.ts</code>
-                      — radicado{' '}
-                      <span className="font-mono text-[11px]">11001310305120260030000</span>. El número del portal web no sustituye al CUI.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="pt-0">
-                    <a
-                      href="/ejemplos/RV_Generacion_Tutela_en_linea_No_202600358.eml"
-                      download="RV_Generacion_Tutela_en_linea_No_202600358.eml"
-                      className="inline-flex items-center rounded-md border border-cyan-600 bg-white px-3 py-2 text-sm font-medium text-cyan-800 hover:bg-cyan-50"
-                    >
-                      <Download className="w-4 h-4 mr-2" />
-                      Descargar .eml de ejemplo (tutela en línea)
-                    </a>
-                  </CardContent>
-                </Card>
-              </div>
             </div>
           )}
 
@@ -3219,7 +3122,7 @@ function GestorSecretariaJudicialContent() {
               <div className="flex justify-between items-center gap-2">
                 <p className="text-sm text-gray-500">{procesos.length} tutela{procesos.length !== 1 ? 's' : ''} en trámite</p>
                 <div className="flex gap-2">
-                  <Button onClick={() => { setShowCrearExpediente(true); setCrearExpedienteTab('reparto'); }} variant="outline" className="border-cyan-500 text-cyan-700 hover:bg-cyan-50">
+                  <Button onClick={() => { setShowCrearExpediente(true); setCrearExpedienteTab('orden'); }} variant="outline" className="border-cyan-500 text-cyan-700 hover:bg-cyan-50">
                     <FolderOpen className="w-4 h-4 mr-2" />
                     Crear expediente
                   </Button>
@@ -3300,7 +3203,7 @@ function GestorSecretariaJudicialContent() {
           {activeTab === 'procesos' && (
             <div className="space-y-6">
               <div className="flex justify-end gap-2">
-                <Button onClick={() => { setShowCrearExpediente(true); setCrearExpedienteTab('reparto'); }} variant="outline" className="border-cyan-500 text-cyan-700 hover:bg-cyan-50">
+                <Button onClick={() => { setShowCrearExpediente(true); setCrearExpedienteTab('orden'); }} variant="outline" className="border-cyan-500 text-cyan-700 hover:bg-cyan-50">
                   <FolderOpen className="w-4 h-4 mr-2" />
                   Crear expediente
                 </Button>
@@ -4466,7 +4369,6 @@ function GestorSecretariaJudicialContent() {
       <Dialog open={showCrearExpediente} onOpenChange={(o) => {
         setShowCrearExpediente(o)
         if (!o) {
-          setImportandoReparto(false)
           setResultadoPrepararOrden(null)
         }
       }}>
@@ -4477,33 +4379,17 @@ function GestorSecretariaJudicialContent() {
               Crear expediente
             </DialogTitle>
             <DialogDescription>
-              Tres pasos visibles: (1) ZIP para crear expediente en el sistema, (2) orden de documentos para reparto/tutela antes de SGDE, (3) datos manuales.
+              Orden de documentos para reparto o tutela antes de SGDE, o datos manuales para crear el proceso en el sistema. Para radicar desde correo use <strong>Radicación</strong> (importador .eml).
             </DialogDescription>
           </DialogHeader>
-          <Tabs value={crearExpedienteTab} onValueChange={(v) => setCrearExpedienteTab(v as 'reparto' | 'orden' | 'manual')}>
-            <TabsList className="grid w-full grid-cols-1 gap-1 sm:grid-cols-3 h-auto sm:h-10">
-              <TabsTrigger value="reparto" className="text-xs sm:text-sm">ZIP → expediente</TabsTrigger>
+          <Tabs value={crearExpedienteTab} onValueChange={(v) => setCrearExpedienteTab(v as 'orden' | 'manual')}>
+            <TabsList className="grid w-full grid-cols-1 gap-1 sm:grid-cols-2 h-auto sm:h-10">
               <TabsTrigger value="orden" className="text-xs sm:text-sm gap-1">
                 <ListOrdered className="w-3.5 h-3.5 shrink-0 hidden sm:inline" />
                 Orden documentos
               </TabsTrigger>
               <TabsTrigger value="manual" className="text-xs sm:text-sm">Datos manuales</TabsTrigger>
             </TabsList>
-            <TabsContent value="reparto" className="mt-4">
-              <form onSubmit={handleImportarReparto} className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Archivo ZIP de reparto</Label>
-                  <Input type="file" accept=".zip" required disabled={importandoReparto} />
-                  <p className="text-xs text-gray-500">Un solo .zip con PDF del acta, demanda, pruebas, informe, etc. Se crea el proceso en JudicialSys y se guardan los archivos por carpeta.</p>
-                </div>
-                <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setShowCrearExpediente(false)} disabled={importandoReparto}>Cancelar</Button>
-                  <Button type="submit" className="bg-amber-500 hover:bg-amber-600" disabled={importandoReparto}>
-                    {importandoReparto ? 'Creando...' : 'Crear expediente'}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </TabsContent>
             <TabsContent value="orden" className="mt-4 space-y-4">
               <p className="text-sm text-gray-600">
                 <strong>Opción A — Solo .eml (recomendado):</strong> descargue el mensaje completo desde Outlook y genere un ZIP con el <strong>PDF del correo</strong> (constancia), el <strong>índice de secuencia</strong> y los archivos <strong>renumerados</strong> (demanda, pruebas/anexos, etc.). Abajo.

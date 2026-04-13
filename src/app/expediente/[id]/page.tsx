@@ -34,6 +34,7 @@ import {
 } from 'lucide-react'
 import { useUserStore, type SimulatedUser } from '@/stores/user-store'
 import { apiFetch } from '@/lib/api-fetch'
+import { etiquetaCarpetaExpediente } from '@/lib/etiqueta-carpeta-expediente'
 import { cn } from '@/lib/utils'
 
 const ROLES_LABEL: Record<string, string> = {
@@ -1734,7 +1735,7 @@ export default function ExpedientePage() {
                       <tr key={a.id} className="hover:bg-emerald-50/50">
                         <td className="px-4 py-2">
                           <Badge variant="outline" className="font-mono text-[10px]">
-                            {a.carpeta || '—'}
+                            {a.carpeta ? etiquetaCarpetaExpediente(a.carpeta) : '—'}
                           </Badge>
                         </td>
                         <td className="px-4 py-2 font-medium text-gray-900 max-w-[min(280px,40vw)] truncate" title={a.nombreOriginal || a.nombreArchivo}>

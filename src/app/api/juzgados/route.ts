@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { TipoJuzgado } from '@prisma/client'
+import { jsonApiErrorConEntorno } from '@/lib/deploy-compat'
 
 // GET - Listar juzgados (para super admin y formularios)
 export async function GET(request: NextRequest) {
@@ -26,10 +27,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, data: juzgados })
   } catch (error) {
     console.error('Error listando juzgados:', error)
-    return NextResponse.json(
-      { success: false, error: 'Error al listar juzgados' },
-      { status: 500 }
-    )
+    const { body, status } = jsonApiErrorConEntorno(error, 'Error al listar juzgados')
+    return NextResponse.json(body, { status })
   }
 }
 

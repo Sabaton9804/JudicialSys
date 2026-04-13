@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { jsonApiErrorConEntorno } from '@/lib/deploy-compat'
 import { EstadoProceso, CategoriaProceso, ClaseProceso } from '@prisma/client'
 import { getUserFromHeader, juzgadoWhere } from '@/lib/auth-utils'
 import { generarRadicado, normalizarRadicado } from '@/lib/radicado'
@@ -90,10 +91,8 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     console.error('Error al obtener procesos:', error)
-    return NextResponse.json(
-      { success: false, error: 'Error al obtener procesos' },
-      { status: 500 }
-    )
+    const { body, status } = jsonApiErrorConEntorno(error, 'Error al obtener procesos')
+    return NextResponse.json(body, { status })
   }
 }
 

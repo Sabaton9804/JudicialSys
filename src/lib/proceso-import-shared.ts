@@ -100,8 +100,14 @@ export function sanitizarNombreDocumentoExpediente(nombre: string): string {
 }
 
 export function clasificarCarpetaNombre(nombre: string): CarpetaArchivo {
-  const base = nombre.split('/').pop() || nombre
+  const rutaNorm = nombre.replace(/\\/g, '/')
+  const base = rutaNorm.split('/').pop() || nombre
   const n = base.toLowerCase()
+  const segmentos = rutaNorm.split('/').filter(Boolean)
+  if (segmentos.length >= 2) {
+    const carpetasPadre = segmentos.slice(0, -1)
+    if (carpetasPadre.some((s) => /^poderes$/i.test(s.trim()))) return 'PODERES'
+  }
   if (/secuencia/i.test(n) && (n.startsWith('00') || /\.txt$/i.test(base))) return 'CONSTANCIAS'
   // Tutela/demanda en línea (Rama): DEMANDA_1_… o DEMANDA25032026_… (sin guion bajo tras la palabra)
   if (/^demanda_/i.test(base) || /^demanda\d/i.test(base)) return 'DEMANDA'
@@ -110,6 +116,8 @@ export function clasificarCarpetaNombre(nombre: string): CarpetaArchivo {
   if (/^(pruebasanexos|anexosprueba|anexospruebas)\.pdf$/i.test(base)) return 'ANEXOS'
   if (/^poder\.pdf$/i.test(base)) return 'PODERES'
   if (/^poder_/i.test(base) || /^poder\d/i.test(base)) return 'PODERES'
+  if (/^poderes(?:[._\s-]|$)/i.test(base) || /\bpoderes\b/i.test(base)) return 'PODERES'
+  if (/\bpoder\b/i.test(n) && !/demandante/i.test(n) && !/^demanda[_\d]/i.test(base)) return 'PODERES'
   if (/apoderamiento/i.test(n) && /\.pdf$/i.test(base)) return 'PODERES'
   if (/^actareparto\.pdf$/i.test(base)) return 'ACTA_REPARTO'
   if (/^correoreparto\.pdf$/i.test(base)) return 'CONSTANCIAS'

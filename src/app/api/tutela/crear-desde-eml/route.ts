@@ -8,6 +8,7 @@ import {
   radicarProcesoEnSqlJusticiaXxi,
   registrarHistorialRadicacionJusticiaXxi,
 } from '@/lib/justicia-xxi-sql/radicar-proceso'
+import { jsonApiErrorConEntorno } from '@/lib/deploy-compat'
 
 function credencialesJusticiaXxiDesdeFormData(formData: FormData): CredencialesJusticiaXxiInput {
   const s = (k: string) => {
@@ -154,9 +155,7 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('Error creando proceso desde .eml:', error)
-    return NextResponse.json(
-      { success: false, error: String(error instanceof Error ? error.message : 'Error al importar') },
-      { status: 500 }
-    )
+    const { body, status } = jsonApiErrorConEntorno(error, 'Error al importar')
+    return NextResponse.json(body, { status })
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { uploadFile } from '@/lib/storage'
+import { etiquetaCarpetaExpediente } from '@/lib/etiqueta-carpeta-expediente'
 
 // Configuración de carpetas permitidas
 const CARPETAS_PERMITIDAS = [
@@ -171,8 +172,8 @@ export async function POST(request: NextRequest) {
         tipo: esMemorial ? 'MEMORIAL_RECIBIDO' : 'ARCHIVO',
         accion: esMemorial ? `Memorial recibido - ${file.name}` : `Archivo subido: ${file.name}`,
         descripcion: esMemorial
-          ? `Documento incorporado a expediente. ${descripcion ? `Observación: ${descripcion}` : `Carpeta: ${carpeta}`}.`
-          : `Carpeta: ${carpeta}, Tamaño: ${(file.size / 1024).toFixed(2)} KB`,
+          ? `Documento incorporado a expediente. ${descripcion ? `Observación: ${descripcion}` : `Carpeta: ${etiquetaCarpetaExpediente(carpeta)}`}.`
+          : `Carpeta: ${etiquetaCarpetaExpediente(carpeta)}, Tamaño: ${(file.size / 1024).toFixed(2)} KB`,
         datos: JSON.stringify({
           archivoId: archivo.id,
           nombreOriginal: file.name,

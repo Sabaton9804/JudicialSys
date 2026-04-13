@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { etiquetaCarpetaExpediente } from '@/lib/etiqueta-carpeta-expediente'
 
 // GET - Listar archivos del proceso
 export async function GET(request: NextRequest) {
@@ -134,7 +135,7 @@ export async function POST(request: NextRequest) {
         usuarioId: body.subidoPorId,
         tipo: 'ARCHIVO',
         accion: `Archivo subido: ${body.nombreOriginal}`,
-        descripcion: `Subido a carpeta: ${body.carpeta}`,
+        descripcion: `Subido a carpeta: ${etiquetaCarpetaExpediente(body.carpeta)}`,
         datos: JSON.stringify(archivo),
       }
     })

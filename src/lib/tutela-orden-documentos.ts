@@ -14,7 +14,7 @@ import type { ArchivoImportRow } from '@/lib/proceso-import-shared'
  *
  * 4) **Pruebas y anexos** — `PRUEBA_….pdf` (se consolidan en `AnexosPruebas.pdf`).
  *
- * 5) **Poder** — Si el ZIP trae `PODER_….pdf` u homónimos (se consolida en `Poder.pdf` → carpeta PODERES).
+ * 5) **Poderes** — Si el ZIP trae `PODER_….pdf`, carpeta `Poderes/` u homónimos (se consolida en `Poder.pdf` → enum `PODERES`, etiqueta «Poderes»).
  *
  * 6) **Informe de ingreso** — Cuando aplique, según nombre o práctica del despacho.
  *
@@ -41,7 +41,7 @@ export const ETIQUETA_ROL_TUTELA: Record<RolDocumentoTutela, string> = {
   ACTA_REPARTO: 'Acta de reparto (constancia PDF, p. ej. SEC … J …)',
   ANEXOS: 'Pruebas y anexos (PRUEBA_ en ZIP; consolidado AnexosPruebas.pdf)',
   DEMANDA: 'Demanda (DEMANDA_ en ZIP tutela en línea)',
-  PODER: 'Poder / apoderamiento (PODER_ en ZIP; consolidado Poder.pdf)',
+  PODER: 'Poderes (poder / PODER_ en ZIP; consolidado Poder.pdf; carpeta «Poderes» en descargas)',
   INFORME_INGRESO: 'Informe de ingreso',
   SIN_CLASIFICAR: 'Sin clasificar automáticamente',
 }
@@ -98,6 +98,13 @@ function esNombreActaReparto(n: string, lower: string): boolean {
  * (p. ej. el de “tutela en línea” con enlace al ZIP).
  */
 export function inferirRolDocumentoTutela(nombre: string): RolDocumentoTutela {
+  const rutaNorm = nombre.replace(/\\/g, '/')
+  const segs = rutaNorm.split('/').filter(Boolean)
+  if (segs.length >= 2) {
+    const padres = segs.slice(0, -1)
+    if (padres.some((s) => /^poderes$/i.test(s.trim()))) return 'PODER'
+  }
+
   const n = normalizarNombre(nombre)
   const lower = n.toLowerCase()
 
@@ -155,6 +162,10 @@ export function inferirRolDocumentoTutela(nombre: string): RolDocumentoTutela {
 
   if (/^poder_/i.test(n) || /^poder\d/i.test(n)) return 'PODER'
   if (/^poder\.pdf$/i.test(n)) return 'PODER'
+  if (/^poderes(?:[._\s-]|$)/i.test(n) || /\bpoderes\b/i.test(lower)) return 'PODER'
+  if (/\bpoder\b/i.test(lower) && !/demandante/i.test(lower) && !/^demanda[_\d]/i.test(n)) {
+    return 'PODER'
+  }
   if (/apoderamiento/i.test(lower) && /\.pdf$/i.test(n)) return 'PODER'
 
   if (lower.includes('anexo') && !lower.includes('demanda')) return 'ANEXOS'

@@ -5,6 +5,7 @@ import {
   textoCatalogoTipoDocumentalParaPrompt,
 } from '@/lib/sgde/catalogo-tipo-documental-sgde'
 import { tieneClaveOpenAI } from '@/lib/parse-reparto-ai'
+import { etiquetaCarpetaExpediente } from '@/lib/etiqueta-carpeta-expediente'
 
 const MODEL = process.env.OPENAI_MODEL_SGDE_TIPO?.trim() || 'gpt-4o-mini'
 
@@ -57,7 +58,7 @@ export async function clasificarTiposDocumentalesSgdeIA(
 
   const lineas = items.map((it, i) => {
     const desc = it.descripcion?.trim() ? ` | nota: ${it.descripcion.trim().slice(0, 200)}` : ''
-    return `${i + 1}. nombre: "${it.nombreOriginal}" | carpeta expediente: ${it.carpeta}${desc}`
+    return `${i + 1}. nombre: "${it.nombreOriginal}" | carpeta expediente: ${etiquetaCarpetaExpediente(it.carpeta)} (${it.carpeta})${desc}`
   })
 
   const system = `Eres secretario judicial en Colombia. Debes asignar a cada archivo UN tipo documental del catálogo del SGDE (Sistema de Gestión Documental Electrónica de la Rama Judicial).

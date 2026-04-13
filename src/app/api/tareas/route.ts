@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { jsonApiErrorConEntorno } from '@/lib/deploy-compat'
 import { EstadoTarea, PrioridadTarea, TipoTarea, AreaJuzgado } from '@prisma/client'
 import { getUserFromHeader, procesoJuzgadoWhere } from '@/lib/auth-utils'
 
@@ -104,10 +105,8 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     console.error('Error al obtener tareas:', error)
-    return NextResponse.json(
-      { success: false, error: 'Error al obtener tareas' },
-      { status: 500 }
-    )
+    const { body, status } = jsonApiErrorConEntorno(error, 'Error al obtener tareas')
+    return NextResponse.json(body, { status })
   }
 }
 
