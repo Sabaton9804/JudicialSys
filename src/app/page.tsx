@@ -26,6 +26,7 @@ import {
 import { useWebSocket } from '@/hooks/use-websocket'
 import { useUserStore } from '@/stores/user-store'
 import { apiFetch } from '@/lib/api-fetch'
+import { SHELL_SOLO_RADICACION_TUTELAS } from '@/config/judicialsys-shell'
 
 // ==================== HELPERS ====================
 /** Parsea la respuesta como JSON. Si la API devuelve HTML (error 404/500), lanza un error conciso sin volcar HTML en consola. */
@@ -172,7 +173,7 @@ const ROLES_LABEL: Record<string, string> = {
 
 function GestorSecretariaJudicialContent() {
   const [activeArea, setActiveArea] = useState<'DESPACHO' | 'SECRETARIA' | 'ADMIN'>('SECRETARIA')
-  const [activeTab, setActiveTab] = useState('dashboard')
+  const [activeTab, setActiveTab] = useState(SHELL_SOLO_RADICACION_TUTELAS ? 'radicacion' : 'dashboard')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [loading, setLoading] = useState(false)
   
@@ -530,15 +531,20 @@ function GestorSecretariaJudicialContent() {
     fetchUsuarios()
   }, [fetchUsuarios])
 
-  // Al cambiar a Despacho, mostrar Expedientes por defecto
+  // Shell reducido: solo Secretaría y pestañas radicación / tutelas
   useEffect(() => {
+    if (SHELL_SOLO_RADICACION_TUTELAS) {
+      if (activeArea !== 'SECRETARIA') setActiveArea('SECRETARIA')
+      if (!['radicacion', 'tutelas'].includes(activeTab)) setActiveTab('radicacion')
+      return
+    }
     if (
       activeArea === 'DESPACHO' &&
       !['dashboard', 'planner', 'tutelas', 'radicacion', 'procesos', 'tareas'].includes(activeTab)
     ) {
       setActiveTab('dashboard')
     }
-  }, [activeArea])
+  }, [activeArea, activeTab])
 
   // Fetch on area/tab change
   useEffect(() => {
@@ -549,8 +555,13 @@ function GestorSecretariaJudicialContent() {
       fetchProvidencias()
       fetchPlanner()
     } else if (activeArea === 'SECRETARIA') {
-      fetchMemoriales()
-      fetchProcesos()
+      if (SHELL_SOLO_RADICACION_TUTELAS) {
+        void fetchJuzgados()
+        if (activeTab === 'tutelas') void fetchTutelas()
+      } else {
+        fetchMemoriales()
+        fetchProcesos()
+      }
     }
     if (activeArea !== 'ADMIN') fetchTareas(activeArea)
     if (activeTab === 'oficios') fetchOficios()
@@ -1492,14 +1503,16 @@ function GestorSecretariaJudicialContent() {
             {sidebarOpen && (
               <div>
                 <h1 className="font-bold text-gray-900">JudicialSys</h1>
-                <p className="text-xs text-gray-500">Juzgado Civil Circuito</p>
+                <p className="text-xs text-gray-500">
+                  {SHELL_SOLO_RADICACION_TUTELAS ? 'Radicación y tutelas' : 'Juzgado Civil Circuito'}
+                </p>
               </div>
             )}
           </div>
         </div>
 
         {/* Area Selector */}
-        {sidebarOpen && (
+        {sidebarOpen && !SHELL_SOLO_RADICACION_TUTELAS && (
           <div className="p-4 border-b border-gray-200">
             <p className="text-xs font-medium text-gray-500 mb-2">ÁREA DE TRABAJO</p>
             <div className="flex flex-col gap-1">
@@ -1544,7 +1557,53 @@ function GestorSecretariaJudicialContent() {
 
         <nav className="flex-1 p-4">
           <ul className="space-y-2">
-            {activeArea === 'ADMIN' ? (
+            {SHELL_SOLO_RADICACION_TUTELAS ? (
+              <>
+                {[
+                  { id: 'tutelas', icon: Scale, label: 'Tutelas', badge: dashboardData?.resumen?.procesos?.tutelas },
+                  { id: 'radicacion', icon: Stamp, label: 'Radicación' },
+                ].map((item) => (
+                  <li key={item.id}>
+                    <button
+                      onClick={() => setActiveTab(item.id)}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
+                        item.id === 'tutelas'
+                          ? activeTab === 'tutelas'
+                            ? 'bg-violet-100 text-violet-800 font-semibold border border-violet-200'
+                            : 'text-violet-700 hover:bg-violet-50 font-medium'
+                          : item.id === 'radicacion'
+                            ? activeTab === 'radicacion'
+                              ? 'bg-teal-50 text-teal-800 font-semibold border border-teal-200'
+                              : 'text-teal-700 hover:bg-teal-50 font-medium'
+                            : activeTab === item.id
+                              ? 'bg-blue-50 text-blue-700 font-medium'
+                              : 'text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      <item.icon
+                        className={
+                          item.id === 'tutelas'
+                            ? 'w-5 h-5 text-violet-600'
+                            : item.id === 'radicacion'
+                              ? 'w-5 h-5 text-teal-600'
+                              : 'w-5 h-5'
+                        }
+                      />
+                      {sidebarOpen && (
+                        <>
+                          <span>{item.label}</span>
+                          {item.badge != null && item.badge > 0 && (
+                            <Badge className={`ml-auto ${item.id === 'tutelas' ? 'bg-violet-200 text-violet-800' : 'bg-red-100 text-red-700'}`}>
+                              {item.badge}
+                            </Badge>
+                          )}
+                        </>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </>
+            ) : activeArea === 'ADMIN' ? (
               <>
                 {[
                   { id: 'usuarios', icon: Users, label: 'Usuarios' },
@@ -1670,41 +1729,45 @@ function GestorSecretariaJudicialContent() {
                 ))}
               </>
             )}
-            <li className="border-t border-gray-200 pt-2 mt-2">
-              <button
-                onClick={() => setActiveTab('procesos')}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
-                  activeTab === 'procesos' 
-                    ? 'bg-amber-50 text-amber-700 font-medium' 
-                    : 'text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                <Briefcase className="w-5 h-5" />
-                {sidebarOpen && <span>Procesos</span>}
-              </button>
-            </li>
-            <li>
-              <a
-                href="/publicaciones"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-cyan-600 hover:bg-cyan-50 font-medium"
-              >
-                <FileText className="w-5 h-5" />
-                {sidebarOpen && <span>Consulta de procesos</span>}
-                {sidebarOpen && <ExternalLink className="w-4 h-4 ml-auto opacity-60" />}
-              </a>
-            </li>
-            {simulatedUser && (
-              <li>
-                <Link
-                  href="/plantillas-documento"
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-amber-800 hover:bg-amber-50 font-medium border border-amber-100"
-                >
-                  <LayoutTemplate className="w-5 h-5 shrink-0 text-amber-700" />
-                  {sidebarOpen && <span>Plantillas de documentos</span>}
-                </Link>
-              </li>
+            {!SHELL_SOLO_RADICACION_TUTELAS && (
+              <>
+                <li className="border-t border-gray-200 pt-2 mt-2">
+                  <button
+                    onClick={() => setActiveTab('procesos')}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
+                      activeTab === 'procesos' 
+                        ? 'bg-amber-50 text-amber-700 font-medium' 
+                        : 'text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    <Briefcase className="w-5 h-5" />
+                    {sidebarOpen && <span>Procesos</span>}
+                  </button>
+                </li>
+                <li>
+                  <a
+                    href="/publicaciones"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-cyan-600 hover:bg-cyan-50 font-medium"
+                  >
+                    <FileText className="w-5 h-5" />
+                    {sidebarOpen && <span>Consulta de procesos</span>}
+                    {sidebarOpen && <ExternalLink className="w-4 h-4 ml-auto opacity-60" />}
+                  </a>
+                </li>
+                {simulatedUser && (
+                  <li>
+                    <Link
+                      href="/plantillas-documento"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-amber-800 hover:bg-amber-50 font-medium border border-amber-100"
+                    >
+                      <LayoutTemplate className="w-5 h-5 shrink-0 text-amber-700" />
+                      {sidebarOpen && <span>Plantillas de documentos</span>}
+                    </Link>
+                  </li>
+                )}
+              </>
             )}
           </ul>
         </nav>
@@ -1740,11 +1803,24 @@ function GestorSecretariaJudicialContent() {
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <Badge className={
-                  activeArea === 'DESPACHO' ? 'bg-purple-100 text-purple-700' :
-                  activeArea === 'ADMIN' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
-                }>
-                  {activeArea === 'DESPACHO' ? 'DESPACHO' : activeArea === 'ADMIN' ? 'ADMINISTRACIÓN' : 'SECRETARÍA'}
+                <Badge
+                  className={
+                    SHELL_SOLO_RADICACION_TUTELAS
+                      ? 'bg-teal-100 text-teal-800'
+                      : activeArea === 'DESPACHO'
+                        ? 'bg-purple-100 text-purple-700'
+                        : activeArea === 'ADMIN'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-blue-100 text-blue-700'
+                  }
+                >
+                  {SHELL_SOLO_RADICACION_TUTELAS
+                    ? 'RADICACIÓN · TUTELAS'
+                    : activeArea === 'DESPACHO'
+                      ? 'DESPACHO'
+                      : activeArea === 'ADMIN'
+                        ? 'ADMINISTRACIÓN'
+                        : 'SECRETARÍA'}
                 </Badge>
                 <h2 className="text-xl font-semibold text-gray-900">
                   {activeTab === 'dashboard' && 'Dashboard'}
@@ -1766,16 +1842,22 @@ function GestorSecretariaJudicialContent() {
                 </h2>
               </div>
               <p className="text-sm text-gray-500 mt-1">
-                {activeArea === 'ADMIN' ? 'Super usuario: asignar cargos y juzgados' : 'Juzgado Primero Civil del Circuito de Bogotá D.C.'}
+                {SHELL_SOLO_RADICACION_TUTELAS
+                  ? 'Interfaz reducida: crear expedientes, tutelas en línea y listado de tutelas.'
+                  : activeArea === 'ADMIN'
+                    ? 'Super usuario: asignar cargos y juzgados'
+                    : 'Juzgado Primero Civil del Circuito de Bogotá D.C.'}
               </p>
             </div>
             <div className="flex items-center gap-4">
-              <Button asChild variant="ghost" size="sm" className="text-slate-600 hover:text-slate-800 shrink-0">
-                <a href="/publicaciones" target="_blank" rel="noopener noreferrer">
-                  <FileText className="w-4 h-4 mr-2" />
-                  Consulta de procesos
-                </a>
-              </Button>
+              {!SHELL_SOLO_RADICACION_TUTELAS && (
+                <Button asChild variant="ghost" size="sm" className="text-slate-600 hover:text-slate-800 shrink-0">
+                  <a href="/publicaciones" target="_blank" rel="noopener noreferrer">
+                    <FileText className="w-4 h-4 mr-2" />
+                    Consulta de procesos
+                  </a>
+                </Button>
+              )}
               <Button onClick={() => { setShowCrearExpediente(true); setCrearExpedienteTab('reparto'); }} variant="outline" size="sm" className="border-amber-500 text-amber-700 hover:bg-amber-50 shrink-0">
                 <Plus className="w-4 h-4 mr-2" />
                 Crear expediente
@@ -1791,7 +1873,7 @@ function GestorSecretariaJudicialContent() {
                     e.key === 'Enter' &&
                     (activeTab === 'tutelas'
                       ? fetchTutelas()
-                      : activeTab === 'procesos'
+                      : !SHELL_SOLO_RADICACION_TUTELAS && activeTab === 'procesos'
                         ? fetchProcesosCiviles()
                         : null)
                   }
@@ -3687,7 +3769,7 @@ function GestorSecretariaJudicialContent() {
           )}
 
           {/* Placeholder para otros tabs */}
-          {!['dashboard', 'proveer', 'planner', 'tutelas', 'memoriales', 'oficios', 'emplazamientos', 'terminos', 'audiencias', 'tareas', 'procesos', 'usuarios', 'juzgados'].includes(activeTab) && (
+          {!['dashboard', 'proveer', 'planner', 'tutelas', 'radicacion', 'memoriales', 'oficios', 'emplazamientos', 'terminos', 'audiencias', 'tareas', 'procesos', 'usuarios', 'juzgados'].includes(activeTab) && (
             <Card>
               <CardContent className="p-12 text-center">
                 <p className="text-gray-500">Módulo en desarrollo: {activeTab}</p>
