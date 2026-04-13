@@ -232,6 +232,14 @@ function GestorSecretariaJudicialContent() {
   /** Formulario pestaña Configuración (shell reducido): credenciales SGDE en navegador. */
   const [configSgdeUsuario, setConfigSgdeUsuario] = useState('')
   const [configSgdePassword, setConfigSgdePassword] = useState('')
+  /** Usuario SGDE guardado en el navegador (cabecera derecha en shell reducido). */
+  const [headerSgdeUsuario, setHeaderSgdeUsuario] = useState('')
+
+  const refreshHeaderSgdeUsuario = useCallback(() => {
+    if (typeof window === 'undefined') return
+    const s = cargarSgdeDesdeNavegador()
+    setHeaderSgdeUsuario(s?.usuario?.trim() ?? '')
+  }, [])
   const [preparandoOrdenDoc, setPreparandoOrdenDoc] = useState(false)
   const [descargandoPaqueteEml, setDescargandoPaqueteEml] = useState(false)
   const [resultadoPrepararOrden, setResultadoPrepararOrden] = useState<{
@@ -631,6 +639,20 @@ function GestorSecretariaJudicialContent() {
       setConfigSgdePassword('')
     }
   }, [activeTab])
+
+  useEffect(() => {
+    if (!SHELL_SOLO_RADICACION_TUTELAS) return
+    refreshHeaderSgdeUsuario()
+  }, [activeTab, refreshHeaderSgdeUsuario])
+
+  useEffect(() => {
+    if (!SHELL_SOLO_RADICACION_TUTELAS || typeof window === 'undefined') return
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'judicialsys_sgde_credentials_v1') refreshHeaderSgdeUsuario()
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [refreshHeaderSgdeUsuario])
 
   // ==================== HANDLERS ====================
   const handleFirmarProvidencia = async (providenciaId: string) => {
@@ -1883,6 +1905,17 @@ function GestorSecretariaJudicialContent() {
                   </span>
                 )}
               </Button>
+              {SHELL_SOLO_RADICACION_TUTELAS && (
+                <div className="flex flex-col items-end justify-center shrink-0 min-w-0 max-w-[120px] sm:max-w-[220px] pr-1 border-l border-slate-200 pl-2 sm:pl-3 ml-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">SGDE</span>
+                  <span
+                    className="text-xs sm:text-sm font-medium text-slate-800 truncate max-w-full"
+                    title={headerSgdeUsuario || 'Configúrelo en Configuración'}
+                  >
+                    {headerSgdeUsuario || '—'}
+                  </span>
+                </div>
+              )}
               {!SHELL_SOLO_RADICACION_TUTELAS && (
                 <>
                   <Select
@@ -3166,6 +3199,7 @@ function GestorSecretariaJudicialContent() {
                           return
                         }
                         guardarSgdeEnNavegador(u, configSgdePassword)
+                        setHeaderSgdeUsuario(u)
                         toast.success('Credenciales SGDE guardadas en este navegador')
                       }}
                     >
@@ -3178,6 +3212,7 @@ function GestorSecretariaJudicialContent() {
                         borrarSgdeDelNavegador()
                         setConfigSgdeUsuario('')
                         setConfigSgdePassword('')
+                        setHeaderSgdeUsuario('')
                         toast.message('Credenciales SGDE borradas de este navegador')
                       }}
                     >
