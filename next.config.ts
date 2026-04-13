@@ -4,7 +4,9 @@ import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 /** Solo en `build:cloudflare`: sustituye drivers pesados por stubs y reduce el Worker bajo el límite gzip (plan Free ~3 MiB). */
 const cfBuild = process.env.JUDICIALSYS_CF_BUILD === "1";
-const cfStubDir = path.join(process.cwd(), "src/lib/stubs/cf");
+/** Rutas relativas al proyecto: Turbopack (Next 16) no acepta absolutas en resolveAlias (rompe en CI). */
+const cfStubPuppeteer = "./src/lib/stubs/cf/puppeteer.ts";
+const cfStubMssql = "./src/lib/stubs/cf/mssql.ts";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -25,27 +27,28 @@ const nextConfig: NextConfig = {
       "framer-motion",
       "date-fns",
     ],
-    ...(cfBuild
-      ? {
-          outputFileTracingExcludes: {
-            "*": [
-              "./node_modules/puppeteer/**/*",
-              "./node_modules/@puppeteer/browsers/**/*",
-              "./node_modules/mssql/**/*",
-              "./node_modules/tedious/**/*",
-            ],
-          },
-        }
-      : {}),
   },
+  ...(cfBuild
+    ? {
+        outputFileTracingExcludes: {
+          "*": [
+            "./node_modules/puppeteer/**/*",
+            "./node_modules/@puppeteer/browsers/**/*",
+            "./node_modules/mssql/**/*",
+            "./node_modules/tedious/**/*",
+          ],
+        },
+      }
+    : {}),
   webpack: (config, { isServer }) => {
     if (cfBuild && isServer) {
       config.resolve = config.resolve ?? {};
+      const abs = (rel: string) => path.join(process.cwd(), rel.replace(/^\.\//, ""));
       config.resolve.alias = {
         ...config.resolve.alias,
-        puppeteer: path.join(cfStubDir, "puppeteer.ts"),
-        mssql: path.join(cfStubDir, "mssql.ts"),
-        "mssql/msnodesqlv8": path.join(cfStubDir, "mssql.ts"),
+        puppeteer: abs(cfStubPuppeteer),
+        mssql: abs(cfStubMssql),
+        "mssql/msnodesqlv8": abs(cfStubMssql),
       };
     }
     return config;
@@ -54,9 +57,9 @@ const nextConfig: NextConfig = {
     ? {
         turbopack: {
           resolveAlias: {
-            puppeteer: path.join(cfStubDir, "puppeteer.ts"),
-            mssql: path.join(cfStubDir, "mssql.ts"),
-            "mssql/msnodesqlv8": path.join(cfStubDir, "mssql.ts"),
+            puppeteer: cfStubPuppeteer,
+            mssql: cfStubMssql,
+            "mssql/msnodesqlv8": cfStubMssql,
           },
         },
       }

@@ -1,6 +1,6 @@
 // Cloudflare Workers Builds: el comando de compilación debe generar `.open-next/`.
 // Usar `npm run build:cloudflare` (equiv. `opennextjs-cloudflare build`), NO solo `npm run build` (`next build`).
-// Instalación: dejar que CF use npm con `package-lock.json` (no subir `bun.lock` obsoleto: rompe `bun install --frozen-lockfile`).
+// Instalación: npm con `package-lock.json`. Build command: `npm run build:cloudflare` (evitar `bun run` si no hay Bun en PATH).
 // Variables de entorno del build (panel CF): PUPPETEER_SKIP_DOWNLOAD=1 — evita descargar Chromium en CI (~300MB+).
 // Este archivo apunta a `.open-next/worker.js` y `.open-next/assets`; sin el build de OpenNext, `wrangler deploy` falla.
 {
