@@ -71,6 +71,10 @@ Pasos generales (referencia, no sustituyen la migración):
 3. **Comando de build:** `npm run build:cloudflare` (genera `.open-next/`; no basta con `npm run build`).
 4. **Variables de entorno en el panel** (`DATABASE_URL`, claves S3, etc.) y, en **Variables de entorno del build**, `PUPPETEER_SKIP_DOWNLOAD=1` para no descargar Chromium en CI (ahorra cientos de MB y tiempo; en Workers el PDF vía Puppeteer no aplica igual que en Node local).
 
+### Límite de 3 MiB (plan Workers Free)
+
+El tamaño que cuenta es el **gzip** del script del Worker. El repo define **`minify: true`** en `wrangler.jsonc` y, en build con `JUDICIALSYS_CF_BUILD=1`, **stubs** en `next.config.ts` para paquetes muy pesados que no suelen usarse en el primer arranque en CF (`@vercel/og`, `docx`, `openai`, `mailparser`, `mammoth`, `pdf-lib`, `html-to-text`, además de `puppeteer`/`mssql`). Esas rutas pueden responder error en CF hasta que desplegués en Node o plan pago (10 MiB). Si aún superás 3 MiB, revisá el analizador de esbuild con `.open-next/server-functions/default/handler.mjs.meta.json` (documentación OpenNext Cloudflare → Troubleshooting).
+
 ---
 
 ## 3. Resumen práctico
